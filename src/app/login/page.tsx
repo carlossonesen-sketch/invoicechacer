@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, FormEvent, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { getBusinessProfile } from "@/lib/businessProfile";
 
 export default function LoginPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -81,6 +82,16 @@ export default function LoginPage() {
         throw new Error("Failed to create session");
       }
 
+      // PATHNAME GUARD: Only redirect to dashboard if we're on the login page
+      if (pathname !== "/login") {
+        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+        if (devToolsEnabled) {
+          console.warn(`[Login] BLOCKED redirect to /dashboard - pathname is ${pathname}, not /login`);
+          console.trace("Redirect blocked");
+        }
+        return;
+      }
+
       // Get redirect target from URL params (set by middleware)
       const redirectPath = searchParams.get("redirect") || "/dashboard";
       
@@ -95,6 +106,7 @@ export default function LoginPage() {
             const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
             if (devToolsEnabled) {
               console.log("[Login] Redirecting to onboarding (no profile found)");
+              console.trace("Login -> Onboarding redirect");
             }
             router.push("/onboarding/company");
           } else {
@@ -103,6 +115,7 @@ export default function LoginPage() {
             const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
             if (devToolsEnabled) {
               console.log(`[Login] Redirecting to requested path: ${redirectPath}`);
+              console.trace("Login -> Requested path redirect");
             }
             router.push(redirectPath);
           }
@@ -111,6 +124,14 @@ export default function LoginPage() {
           const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
           if (devToolsEnabled) {
             console.log(`[Login] Redirecting to: ${redirectPath}`);
+            console.trace("Login -> Post-login redirect");
+          }
+          if (redirectPath === "/dashboard") {
+            const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+            if (devToolsEnabled) {
+              console.log(`[Login] Redirecting to /dashboard from pathname: ${pathname}`);
+              console.trace("Login -> Dashboard redirect");
+            }
           }
           router.push(redirectPath);
         }
@@ -121,6 +142,10 @@ export default function LoginPage() {
         const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
         if (devToolsEnabled) {
           console.log(`[Login] Profile check failed, redirecting to: ${redirectPath}`);
+          if (redirectPath === "/dashboard") {
+            console.log(`[Login] Redirecting to /dashboard from pathname: ${pathname}`);
+            console.trace("Login -> Dashboard redirect (profile error)");
+          }
         }
         router.push(redirectPath);
       }

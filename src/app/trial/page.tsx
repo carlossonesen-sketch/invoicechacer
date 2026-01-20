@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { startTrial } from "@/lib/billing";
@@ -50,6 +50,7 @@ const tiers = [
 
 export default function TrialPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -98,10 +99,21 @@ export default function TrialPage() {
       // Call Firestore-ready stub function
       await startTrial(user.uid, selectedPlan);
 
+      // PATHNAME GUARD: Only redirect to dashboard if we're on the trial page
+      if (pathname !== "/trial") {
+        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+        if (devToolsEnabled) {
+          console.warn(`[Trial] BLOCKED redirect to /dashboard - pathname is ${pathname}, not /trial`);
+          console.trace("Redirect blocked");
+        }
+        return;
+      }
+
       // Redirect to dashboard
       const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
       if (devToolsEnabled) {
-        console.log(`[Trial] Redirecting to /dashboard from: ${typeof window !== "undefined" ? window.location.pathname : "server"}`);
+        console.log(`[Trial] Redirecting to /dashboard from pathname: ${pathname}`);
+        console.trace("Trial -> Dashboard redirect");
       }
       router.push("/dashboard");
     } catch (err: any) {

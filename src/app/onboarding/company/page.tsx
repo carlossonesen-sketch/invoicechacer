@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { upsertBusinessProfile } from "@/lib/businessProfile";
@@ -15,6 +15,7 @@ import { User } from "firebase/auth";
 
 export default function CompanyOnboardingPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -78,10 +79,21 @@ export default function CompanyOnboardingPage() {
         phone: formData.phone.trim() || undefined,
       });
 
+      // PATHNAME GUARD: Only redirect to dashboard if we're on the onboarding page
+      if (pathname !== "/onboarding/company") {
+        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+        if (devToolsEnabled) {
+          console.warn(`[Onboarding] BLOCKED redirect to /dashboard - pathname is ${pathname}, not /onboarding/company`);
+          console.trace("Redirect blocked");
+        }
+        return;
+      }
+
       // Redirect to dashboard after successful save
       const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
       if (devToolsEnabled) {
-        console.log(`[Onboarding] Redirecting to /dashboard from: ${typeof window !== "undefined" ? window.location.pathname : "server"}`);
+        console.log(`[Onboarding] Redirecting to /dashboard from pathname: ${pathname}`);
+        console.trace("Onboarding -> Dashboard redirect");
       }
       router.push("/dashboard");
     } catch (error: any) {

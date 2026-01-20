@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { useRouter, useParams, useSearchParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
@@ -320,7 +320,16 @@ export default function InvoiceDetailPage() {
           {/* Breadcrumb/Back Link */}
           <div>
             <button
-              onClick={() => router.push("/dashboard")}
+              onClick={() => {
+                // Button click redirect - always allowed (user-initiated)
+                const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+                if (devToolsEnabled) {
+                  const pathname = typeof window !== "undefined" ? window.location.pathname : "server";
+                  console.log(`[InvoiceDetail] Back button clicked, redirecting to /dashboard from pathname: ${pathname}`);
+                  console.trace("InvoiceDetail -> Dashboard redirect (button)");
+                }
+                router.push("/dashboard");
+              }}
               className="flex items-center text-sm text-gray-600 hover:text-gray-900 transition-colors"
             >
               <span className="mr-1">←</span>
