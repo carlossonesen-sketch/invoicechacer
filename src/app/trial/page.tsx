@@ -99,6 +99,10 @@ export default function TrialPage() {
       await startTrial(user.uid, selectedPlan);
 
       // Redirect to dashboard
+      const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+      if (devToolsEnabled) {
+        console.log(`[Trial] Redirecting to /dashboard from: ${typeof window !== "undefined" ? window.location.pathname : "server"}`);
+      }
       router.push("/dashboard");
     } catch (err: any) {
       console.error("Failed to start trial:", err);

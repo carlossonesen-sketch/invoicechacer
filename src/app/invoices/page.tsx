@@ -59,7 +59,15 @@ export default function InvoicesPage() {
   return (
     <AppLayout>
       <Header title="Invoices">
-        <Button onClick={() => router.push("/invoices/new")}>New Invoice</Button>
+        <Button 
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            router.push("/invoices/new");
+          }}
+        >
+          New Invoice
+        </Button>
       </Header>
       <div className="flex-1 overflow-auto p-6">
         <div className="space-y-4">

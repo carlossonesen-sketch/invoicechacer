@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, FormEvent, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { getBusinessProfile } from "@/lib/businessProfile";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -80,20 +81,48 @@ export default function LoginPage() {
         throw new Error("Failed to create session");
       }
 
+      // Get redirect target from URL params (set by middleware)
+      const redirectPath = searchParams.get("redirect") || "/dashboard";
+      
       // Check if user has completed company profile onboarding
       try {
         const profile = await getBusinessProfile(userCredential.user.uid);
         if (!profile) {
           // Redirect to onboarding if profile is missing
-          router.push("/onboarding/company");
+          // Only if coming from login flow, otherwise respect redirect param
+          const shouldForceOnboarding = redirectPath === "/dashboard" || !redirectPath;
+          if (shouldForceOnboarding) {
+            const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+            if (devToolsEnabled) {
+              console.log("[Login] Redirecting to onboarding (no profile found)");
+            }
+            router.push("/onboarding/company");
+          } else {
+            // User was trying to access a specific page, let them go there
+            // They'll be prompted for onboarding later if needed
+            const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+            if (devToolsEnabled) {
+              console.log(`[Login] Redirecting to requested path: ${redirectPath}`);
+            }
+            router.push(redirectPath);
+          }
         } else {
-          // Redirect to dashboard if profile exists
-          router.push("/dashboard");
+          // Profile exists, redirect to requested path or dashboard
+          const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+          if (devToolsEnabled) {
+            console.log(`[Login] Redirecting to: ${redirectPath}`);
+          }
+          router.push(redirectPath);
         }
       } catch (profileError) {
-        // If profile check fails, still redirect to dashboard
+        // If profile check fails, redirect to requested path or dashboard
         console.error("Failed to check business profile:", profileError);
-        router.push("/dashboard");
+        const redirectPath = searchParams.get("redirect") || "/dashboard";
+        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+        if (devToolsEnabled) {
+          console.log(`[Login] Profile check failed, redirecting to: ${redirectPath}`);
+        }
+        router.push(redirectPath);
       }
       router.refresh();
     } catch (err: any) {

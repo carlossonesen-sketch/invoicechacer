@@ -223,7 +223,17 @@ export default function DashboardPage() {
 
   return (
     <AppLayout>
-      <Header title="Dashboard" />
+      <Header title="Dashboard">
+        <Button 
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            router.push("/invoices/new");
+          }}
+        >
+          New Invoice
+        </Button>
+      </Header>
       <div className="flex-1 overflow-auto p-6">
         <div className="space-y-6">
           {/* Upgrade Banner */}

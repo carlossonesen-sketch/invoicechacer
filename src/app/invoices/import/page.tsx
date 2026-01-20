@@ -285,6 +285,10 @@ export default function ImportInvoicesPage() {
       if (result.success > 0) {
         // Navigate to dashboard after a short delay
         setTimeout(() => {
+          const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+          if (devToolsEnabled) {
+            console.log(`[Import] Redirecting to /dashboard from: ${typeof window !== "undefined" ? window.location.pathname : "server"}`);
+          }
           router.push("/dashboard");
         }, 2000);
       }
