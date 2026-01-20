@@ -222,6 +222,7 @@ export default function BillingPage() {
             </Link>
           </div>
         </div>
+      </div>
       </AppLayout>
     );
   }
