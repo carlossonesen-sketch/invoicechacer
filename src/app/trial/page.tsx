@@ -9,6 +9,8 @@ import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 
+type PlanId = "starter" | "pro" | "business";
+
 const tiers = [
   {
     id: "starter",
@@ -51,7 +53,7 @@ export default function TrialPage() {
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<PlanId>("starter");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string>("");
 
@@ -75,11 +77,6 @@ export default function TrialPage() {
   }, [router, searchParams]);
 
   async function handleStartTrial() {
-    if (!selectedPlan) {
-      setError("Please select a plan");
-      return;
-    }
-
     if (!user) {
       router.push("/login?redirect=/trial");
       return;
@@ -149,7 +146,7 @@ export default function TrialPage() {
             {tiers.map((tier) => (
               <div
                 key={tier.id}
-                onClick={() => setSelectedPlan(tier.id)}
+                onClick={() => setSelectedPlan(tier.id as PlanId)}
                 className={`bg-white rounded-lg border-2 p-6 cursor-pointer transition-all ${
                   selectedPlan === tier.id
                     ? "border-blue-500 shadow-lg"
@@ -209,7 +206,7 @@ export default function TrialPage() {
           <div className="text-center">
             <Button
               onClick={handleStartTrial}
-              disabled={!selectedPlan || starting}
+              disabled={starting}
               size="lg"
             >
               {starting ? "Starting trial..." : "Start free trial"}
