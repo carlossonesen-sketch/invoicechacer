@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { getBusinessProfile, subscribeBusinessProfile, upsertBusinessProfile, BusinessProfile } from "@/lib/businessProfile";
+import { getBusinessProfile, upsertBusinessProfile } from "@/lib/businessProfile";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -41,27 +41,16 @@ export default function CompanySettingsPage() {
       setUser(currentUser);
 
       try {
-        // Subscribe to real-time updates
-        const profileUnsubscribe = subscribeBusinessProfile(currentUser.uid, (profile, error) => {
-          if (error) {
-            console.error("Profile subscription error:", error);
-            setLoading(false);
-            return;
-          }
-
-          if (profile) {
-            setFormData({
-              companyName: profile.companyName || "",
-              companyEmail: profile.companyEmail || "",
-              phone: profile.phone || "",
-            });
-          }
-          setLoading(false);
-        });
-
-        return () => {
-          profileUnsubscribe();
-        };
+        // Use one-time fetch instead of subscription for better performance
+        const profile = await getBusinessProfile(currentUser.uid);
+        if (profile) {
+          setFormData({
+            companyName: profile.companyName || "",
+            companyEmail: profile.companyEmail || "",
+            phone: profile.phone || "",
+          });
+        }
+        setLoading(false);
       } catch (error) {
         console.error("Failed to load company profile:", error);
         setLoading(false);

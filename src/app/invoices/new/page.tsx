@@ -27,6 +27,7 @@ export default function NewInvoicePage() {
   const [successMessage, setSuccessMessage] = useState<string>("");
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState<{
     customerName: string;
@@ -139,13 +140,24 @@ export default function NewInvoicePage() {
         maxChases: formData.maxChases,
       });
 
-      // Show success message briefly, then redirect to invoice detail page
+      // Store invoice ID and reset form for "Add another" flow
+      setCreatedInvoiceId(invoiceId);
       setSuccessMessage("Invoice created successfully!");
       
-      // Redirect after a short delay to show success message
-      setTimeout(() => {
-        router.push(`/invoices/${invoiceId}`);
-      }, 1000);
+      // Reset form to allow adding another invoice
+      setFormData({
+        customerName: "",
+        customerEmail: "",
+        amount: "",
+        dueDate: "",
+        notes: "",
+        paymentLink: "",
+        status: "pending",
+        autoChaseEnabled: false,
+        autoChaseDays: 3,
+        maxChases: 3,
+      });
+      setLoading(false);
     } catch (error: any) {
       console.error("Failed to create invoice:", error);
       setErrors({ 
@@ -310,7 +322,36 @@ export default function NewInvoicePage() {
 
           {successMessage && (
             <div className="bg-green-50 border border-green-200 rounded-md p-4">
-              <p className="text-sm text-green-800">{successMessage}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-green-800 font-medium">{successMessage}</p>
+                {createdInvoiceId && (
+                  <div className="flex gap-2 ml-4">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        router.push(`/invoices/${createdInvoiceId}`);
+                      }}
+                    >
+                      View Invoice
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setSuccessMessage("");
+                        setCreatedInvoiceId(null);
+                        router.replace("/invoices/new");
+                        router.refresh();
+                      }}
+                    >
+                      Add Another
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

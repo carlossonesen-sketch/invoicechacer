@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
+import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, markInvoicePaid, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
 import { dateInputToTimestamp, timestampToDateInput, formatDateOnly } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
@@ -19,6 +19,7 @@ import { FormField } from "@/components/ui/form-field";
 import { UpgradeModal } from "@/components/ui/upgrade-modal";
 import { isValidEmail } from "@/lib/utils";
 import { useEntitlements } from "@/hooks/useEntitlements";
+import { useToast } from "@/components/ui/toast";
 
 export default function InvoiceDetailPage() {
   const router = useRouter();
@@ -40,6 +41,7 @@ export default function InvoiceDetailPage() {
   const { isPro } = useEntitlements();
   const [user, setUser] = useState<any>(null);
   const [isDev, setIsDev] = useState(false);
+  const { showToast, ToastComponent } = useToast();
 
   const [formData, setFormData] = useState<{
     customerName: string;
@@ -139,7 +141,8 @@ export default function InvoiceDetailPage() {
     return () => {
       authUnsubscribe();
     };
-  }, [invoiceId, router, shouldStartEditing]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceId]); // Only depend on invoiceId to avoid re-subscribing
 
   function validate(): boolean {
     const newErrors: Record<string, string> = {};
@@ -205,14 +208,41 @@ export default function InvoiceDetailPage() {
         maxChases: formData.maxChases,
       });
 
-      setSuccessMessage("Invoice updated successfully!");
+      setSuccessMessage("Saved");
       setIsEditing(false);
+      
+      // Refresh to ensure UI updates (fallback if realtime doesn't update immediately)
+      router.refresh();
       
       // Clear success message after 3 seconds
       setTimeout(() => setSuccessMessage(""), 3000);
     } catch (error: any) {
       console.error("Failed to update invoice:", error);
       setErrors({ submit: error.message || "Failed to update invoice. Please try again." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleMarkPaid() {
+    if (!invoice) return;
+
+    if (!confirm("Mark this invoice as paid?")) {
+      return;
+    }
+
+    setSaving(true);
+    setSuccessMessage("");
+    setErrors({});
+
+    try {
+      await markInvoicePaid(invoice.id);
+      setSuccessMessage("Marked paid");
+      router.refresh();
+      setTimeout(() => setSuccessMessage(""), 3000);
+    } catch (error: any) {
+      console.error("Failed to mark invoice as paid:", error);
+      setErrors({ submit: error.message || "Failed to mark as paid. Please try again." });
     } finally {
       setSaving(false);
     }
@@ -267,9 +297,9 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  // Convert dueAt to Date for display (using local timezone)
-  const getDueDate = () => {
-    if (!invoice.dueAt) return new Date();
+  // Memoize due date conversion to avoid recalculation
+  const dueDateForDisplay = useMemo(() => {
+    if (!invoice?.dueAt) return new Date();
     if (typeof invoice.dueAt === "string") {
       return new Date(invoice.dueAt);
     }
@@ -277,9 +307,7 @@ export default function InvoiceDetailPage() {
       return invoice.dueAt.toDate();
     }
     return new Date();
-  };
-  
-  const dueDateForDisplay = getDueDate();
+  }, [invoice?.dueAt]);
 
   return (
     <AppLayout>
@@ -299,32 +327,44 @@ export default function InvoiceDetailPage() {
 
           {/* Summary Header */}
           <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <div className="text-sm text-gray-500 mb-1">Invoice #{invoice.id}</div>
-                <div className="flex items-center gap-3 mb-2">
-                  <h2 className="text-2xl font-semibold text-gray-900">
+            <div className="flex items-start justify-between mb-6">
+              <div className="flex-1">
+                <div className="text-sm text-gray-500 mb-2">Invoice #{invoice.id}</div>
+                <div className="flex items-center gap-3 mb-4">
+                  <h2 className="text-3xl font-bold text-gray-900">
                     <Currency cents={invoice.amount || 0} />
                   </h2>
                   <StatusBadge status={invoice.status} />
                 </div>
-              </div>
-              {!isEditing && (
-                <Button variant="secondary" onClick={() => setIsEditing(true)}>
-                  Edit
-                </Button>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <div className="text-gray-500">Due Date</div>
-                <div className="font-medium text-gray-900">
-                    <DateLabel date={dueDateForDisplay} />
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Customer</div>
+                    <div className="text-lg font-semibold text-gray-900">{invoice.customerName}</div>
+                    <div className="text-sm text-gray-600">{invoice.customerEmail}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Due Date</div>
+                    <div className="text-lg font-semibold text-gray-900">
+                      <DateLabel date={dueDateForDisplay} />
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div>
-                <div className="text-gray-500">Customer Email</div>
-                <div className="font-medium text-gray-900">{invoice.customerEmail}</div>
+              <div className="flex gap-2 ml-4">
+                {!isEditing && invoice.status !== "paid" && (
+                  <Button 
+                    onClick={handleMarkPaid}
+                    disabled={saving}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    {saving ? "Saving..." : "Mark Paid"}
+                  </Button>
+                )}
+                {!isEditing && (
+                  <Button variant="secondary" onClick={() => setIsEditing(true)}>
+                    Edit
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -733,6 +773,7 @@ export default function InvoiceDetailPage() {
           message="Auto-chase is a Pro feature. Upgrade now to automatically send reminder emails to your customers."
         />
       </div>
+      {ToastComponent}
     </AppLayout>
   );
 }

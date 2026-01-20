@@ -10,6 +10,7 @@ const navigation = [
   { name: "Company Profile", href: "/settings/company" },
   { name: "Settings", href: "/settings" },
   { name: "Billing", href: "/settings/billing" },
+  { name: "Pricing", href: "/pricing", public: true },
 ];
 
 export function Sidebar() {

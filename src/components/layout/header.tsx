@@ -58,12 +58,19 @@ export function Header({ title, children }: HeaderProps) {
       {title && <h2 className="text-lg font-semibold text-gray-900">{title}</h2>}
       <div className="flex items-center gap-4">
         {children && <div className="flex items-center gap-4">{children}</div>}
+        {!userEmail && !loading && (
+          <Button variant="ghost" size="sm" onClick={() => router.push("/pricing")}>
+            Pricing
+          </Button>
+        )}
         {userEmail && (
           <span className="text-sm text-gray-600">{userEmail}</span>
         )}
-        <Button variant="ghost" size="sm" onClick={handleLogout}>
-          Logout
-        </Button>
+        {userEmail && (
+          <Button variant="ghost" size="sm" onClick={handleLogout}>
+            Logout
+          </Button>
+        )}
       </div>
     </header>
   );

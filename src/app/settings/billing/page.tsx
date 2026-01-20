@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { useEntitlements } from "@/hooks/useEntitlements";
 import { EntitlementsService } from "@/lib/entitlements";
+import Link from "next/link";
 
 export default function BillingPage() {
   const router = useRouter();
@@ -113,9 +114,14 @@ export default function BillingPage() {
               </ul>
 
               {!isPro && (
-                <Button onClick={handleUpgrade} disabled={upgrading} className="w-full">
-                  {upgrading ? "Upgrading..." : "Upgrade to Pro"}
-                </Button>
+                <div className="space-y-2">
+                  <Button onClick={() => router.push("/trial")} className="w-full">
+                    Start free trial
+                  </Button>
+                  <Button onClick={() => router.push("/pricing")} variant="secondary" className="w-full">
+                    View pricing
+                  </Button>
+                </div>
               )}
               {isPro && (
                 <Button variant="secondary" disabled className="w-full">
@@ -165,9 +171,14 @@ export default function BillingPage() {
               </ul>
 
               {!isPro && (
-                <Button onClick={handleUpgrade} disabled={upgrading} className="w-full">
-                  {upgrading ? "Upgrading..." : "Upgrade to Pro"}
-                </Button>
+                <div className="space-y-2">
+                  <Button onClick={() => router.push("/trial")} className="w-full">
+                    Start free trial
+                  </Button>
+                  <Button onClick={() => router.push("/pricing")} variant="secondary" className="w-full">
+                    View pricing
+                  </Button>
+                </div>
               )}
               {isPro && (
                 <Button variant="secondary" onClick={handleDowngrade} className="w-full">
@@ -201,14 +212,16 @@ export default function BillingPage() {
             </div>
           )}
 
-          {/* Note */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <p className="text-sm text-blue-800">
-              <strong>Note:</strong> Real billing integration is coming soon. For now, Pro status is managed via localStorage for development and testing purposes.
+          {/* Link to full pricing page */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6 text-center">
+            <p className="text-gray-600 mb-4">
+              Want to see all plan options and features?
             </p>
+            <Link href="/pricing">
+              <Button variant="secondary">View full pricing page</Button>
+            </Link>
           </div>
         </div>
-      </div>
-    </AppLayout>
-  );
-}
+      </AppLayout>
+    );
+  }

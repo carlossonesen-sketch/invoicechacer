@@ -2,17 +2,20 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { subscribeToUserInvoices, FirestoreInvoice, InvoiceQueryResult } from "@/lib/invoices";
+import { subscribeToUserInvoices, fetchNextPageOfInvoices, FirestoreInvoice, InvoiceSubscriptionResult, markInvoicePaid } from "@/lib/invoices";
+import { QueryDocumentSnapshot } from "firebase/firestore";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Currency } from "@/components/ui/currency";
 import { DateLabel } from "@/components/ui/date-label";
 import { Button } from "@/components/ui/button";
+import { DashboardSkeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { formatCurrency } from "@/lib/utils";
 import { useEntitlements } from "@/hooks/useEntitlements";
 import { User } from "firebase/auth";
@@ -21,8 +24,14 @@ export default function DashboardPage() {
   const router = useRouter();
   const { isPro } = useEntitlements();
   const [user, setUser] = useState<User | null>(null);
-  const [result, setResult] = useState<InvoiceQueryResult>({ invoices: [] });
+  const [result, setResult] = useState<InvoiceSubscriptionResult>({ invoices: [] });
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [allInvoices, setAllInvoices] = useState<FirestoreInvoice[]>([]);
+  const pageMountTime = useRef<number>(Date.now());
+  const firstRenderTime = useRef<number | null>(null);
+  const invoiceUnsubscribeRef = useRef<(() => void) | null>(null);
+  const { showToast, ToastComponent } = useToast();
 
   useEffect(() => {
     if (!auth) {
@@ -30,7 +39,7 @@ export default function DashboardPage() {
       return;
     }
 
-    let invoiceUnsubscribe: (() => void) | null = null;
+    pageMountTime.current = Date.now();
 
     const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) {
@@ -40,72 +49,127 @@ export default function DashboardPage() {
       setUser(currentUser);
       
       // Clean up previous subscription if any
-      if (invoiceUnsubscribe) {
-        invoiceUnsubscribe();
+      if (invoiceUnsubscribeRef.current) {
+        invoiceUnsubscribeRef.current();
+        invoiceUnsubscribeRef.current = null;
       }
 
-      // Set up real-time subscription
+      // Set up real-time subscription with limit
       setLoading(true);
-      invoiceUnsubscribe = subscribeToUserInvoices(currentUser, (invoiceResult) => {
+      setAllInvoices([]);
+      invoiceUnsubscribeRef.current = subscribeToUserInvoices(currentUser, (invoiceResult) => {
         setResult(invoiceResult);
+        setAllInvoices(invoiceResult.invoices);
         setLoading(false);
-      });
+        
+        // Performance logging (dev-only)
+        if (firstRenderTime.current === null && invoiceResult.invoices.length > 0) {
+          firstRenderTime.current = Date.now();
+          const timeToFirstRender = firstRenderTime.current - pageMountTime.current;
+          if (process.env.NODE_ENV !== "production") {
+            console.log(`[Perf] Dashboard: ${timeToFirstRender}ms to first invoice render`);
+          }
+        }
+      }, 25); // Limit to 25 invoices initially
     });
 
     return () => {
       authUnsubscribe();
-      if (invoiceUnsubscribe) {
-        invoiceUnsubscribe();
+      if (invoiceUnsubscribeRef.current) {
+        invoiceUnsubscribeRef.current();
+        invoiceUnsubscribeRef.current = null;
       }
     };
   }, [router]);
 
-  // Calculate KPIs
-  const invoices = result.invoices || [];
-  const today = new Date();
-  const last30Days = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+  // Memoize KPI calculations to avoid recalculation on every render
+  const kpis = useMemo(() => {
+    const invoices = allInvoices;
+    const today = new Date();
+    const last30Days = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-  const outstanding = invoices
-    .filter((inv) => inv.status === "pending")
-    .reduce((sum, inv) => sum + (inv.amount || 0), 0);
+    const outstanding = invoices
+      .filter((inv) => inv.status === "pending")
+      .reduce((sum, inv) => sum + (inv.amount || 0), 0);
 
-  const overdue = invoices
-    .filter((inv) => {
-      const dueDate = typeof inv.dueAt === "string" ? new Date(inv.dueAt) : inv.dueAt?.toDate?.() || new Date();
-      return inv.status === "pending" && dueDate < today;
-    })
-    .reduce((sum, inv) => sum + (inv.amount || 0), 0);
+    const overdue = invoices
+      .filter((inv) => {
+        const dueDate = typeof inv.dueAt === "string" 
+          ? new Date(inv.dueAt) 
+          : inv.dueAt?.toDate?.() || new Date();
+        return inv.status === "overdue" || (inv.status === "pending" && dueDate < today);
+      })
+      .reduce((sum, inv) => sum + (inv.amount || 0), 0);
 
-  const paidLast30Days = invoices
-    .filter((inv) => {
-      const updatedDate = typeof inv.updatedAt === "string" 
-        ? new Date(inv.updatedAt) 
-        : inv.updatedAt?.toDate?.() || new Date(inv.createdAt as string);
-      return inv.status === "paid" && updatedDate >= last30Days;
-    })
-    .reduce((sum, inv) => sum + (inv.amount || 0), 0);
+    const paidLast30Days = invoices
+      .filter((inv) => {
+        const updatedDate = typeof inv.updatedAt === "string" 
+          ? new Date(inv.updatedAt) 
+          : inv.updatedAt?.toDate?.() || new Date(inv.createdAt as string);
+        return inv.status === "paid" && updatedDate >= last30Days;
+      })
+      .reduce((sum, inv) => sum + (inv.amount || 0), 0);
 
-  const totalInvoices = invoices.length;
+    const totalInvoices = invoices.length;
 
-  // Get recently updated invoices (last 10)
-  const recentInvoices = [...invoices]
-    .sort((a, b) => {
-      const dateA = typeof a.updatedAt === "string" 
-        ? new Date(a.updatedAt) 
-        : a.updatedAt?.toDate?.() || new Date(a.createdAt as string);
-      const dateB = typeof b.updatedAt === "string" 
-        ? new Date(b.updatedAt) 
-        : b.updatedAt?.toDate?.() || new Date(b.createdAt as string);
-      return dateB.getTime() - dateA.getTime();
-    })
-    .slice(0, 10);
+    return { outstanding, overdue, paidLast30Days, totalInvoices };
+  }, [allInvoices]);
+
+  // Memoize recent invoices list
+  const recentInvoices = useMemo(() => {
+    return [...allInvoices]
+      .sort((a, b) => {
+        const dateA = typeof a.updatedAt === "string" 
+          ? new Date(a.updatedAt) 
+          : a.updatedAt?.toDate?.() || new Date(a.createdAt as string);
+        const dateB = typeof b.updatedAt === "string" 
+          ? new Date(b.updatedAt) 
+          : b.updatedAt?.toDate?.() || new Date(b.createdAt as string);
+        return dateB.getTime() - dateA.getTime();
+      })
+      .slice(0, 10);
+  }, [allInvoices]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (!user || !result.lastDoc || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      const nextPageResult = await fetchNextPageOfInvoices(user, result.lastDoc, 25);
+      if (nextPageResult.invoices.length > 0) {
+        setAllInvoices((prev) => [...prev, ...nextPageResult.invoices]);
+        setResult((prev) => ({
+          ...prev,
+          lastDoc: nextPageResult.lastDoc,
+          hasMore: nextPageResult.hasMore,
+        }));
+      } else {
+        setResult((prev) => ({ ...prev, hasMore: false }));
+      }
+    } catch (error) {
+      console.error("Failed to load more invoices:", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [user, result.lastDoc, loadingMore]);
+
+  const handleMarkPaid = useCallback(async (invoiceId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await markInvoicePaid(invoiceId);
+      showToast("Marked paid");
+    } catch (error: any) {
+      console.error("Failed to mark invoice as paid:", error);
+      showToast(error.message || "Failed to mark as paid", "error");
+    }
+  }, [showToast]);
 
   if (loading) {
     return (
       <AppLayout>
         <Header title="Dashboard" />
         <div className="flex-1 overflow-auto p-6">
-          <div className="text-gray-500">Loading...</div>
+          <DashboardSkeleton />
         </div>
       </AppLayout>
     );
@@ -172,9 +236,14 @@ export default function DashboardPage() {
                     Get auto-chase emails, custom cadence, and priority support.
                   </p>
                 </div>
-                <Button onClick={() => router.push("/settings/billing")} size="sm">
-                  Upgrade to Pro
-                </Button>
+                <div className="flex gap-2">
+                  <Button onClick={() => router.push("/trial")} size="sm">
+                    Start free trial
+                  </Button>
+                  <Button onClick={() => router.push("/settings/billing")} variant="secondary" size="sm">
+                    View plans
+                  </Button>
+                </div>
               </div>
             </div>
           )}
@@ -184,36 +253,27 @@ export default function DashboardPage() {
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <div className="text-sm font-medium text-gray-500">Outstanding</div>
               <div className="mt-2 text-2xl font-semibold text-gray-900">
-                {formatCurrency(outstanding)}
+                {formatCurrency(kpis.outstanding)}
               </div>
             </div>
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <div className="text-sm font-medium text-gray-500">Overdue</div>
               <div className="mt-2 text-2xl font-semibold text-red-600">
-                {formatCurrency(overdue)}
+                {formatCurrency(kpis.overdue)}
               </div>
             </div>
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <div className="text-sm font-medium text-gray-500">Paid (Last 30 days)</div>
               <div className="mt-2 text-2xl font-semibold text-green-600">
-                {formatCurrency(paidLast30Days)}
+                {formatCurrency(kpis.paidLast30Days)}
               </div>
             </div>
             <div className="bg-white rounded-lg border border-gray-200 p-6">
               <div className="text-sm font-medium text-gray-500">Total Invoices</div>
-              <div className="mt-2 text-2xl font-semibold text-gray-900">{totalInvoices}</div>
+              <div className="mt-2 text-2xl font-semibold text-gray-900">{kpis.totalInvoices}</div>
             </div>
           </div>
 
-          {/* Missing createdAt warning */}
-          {result.hasMissingCreatedAt && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <p className="text-sm text-yellow-800">
-                <strong>Note:</strong> Some invoices are missing <code className="bg-yellow-100 px-1 rounded">createdAt</code> timestamps. 
-                They may not appear in the correct order. This is typically caused by invoices created before serverTimestamp was implemented.
-              </p>
-            </div>
-          )}
 
           {/* Recently Updated Invoices */}
           <div className="bg-white rounded-lg border border-gray-200">
@@ -259,53 +319,62 @@ export default function DashboardPage() {
                       const updatedDate = typeof invoice.updatedAt === "string" 
                         ? new Date(invoice.updatedAt) 
                         : invoice.updatedAt?.toDate?.() || new Date(invoice.createdAt as string);
+                      const isPaid = invoice.status === "paid";
                       
                       return (
                         <tr
                           key={invoice.id}
-                          className="hover:bg-gray-50"
+                          className="hover:bg-gray-50 cursor-pointer transition-colors"
+                          onClick={() => router.push(`/invoices/${invoice.id}`)}
                         >
-                          <td 
-                            className="px-6 py-4 whitespace-nowrap cursor-pointer"
-                            onClick={() => router.push(`/invoices/${invoice.id}`)}
-                          >
+                          <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm font-medium text-gray-900">{invoice.customerName}</div>
                             <div className="text-sm text-gray-500">{invoice.customerEmail}</div>
                           </td>
-                          <td 
-                            className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 cursor-pointer"
-                            onClick={() => router.push(`/invoices/${invoice.id}`)}
-                          >
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             <Currency cents={invoice.amount || 0} />
                           </td>
-                          <td 
-                            className="px-6 py-4 whitespace-nowrap cursor-pointer"
-                            onClick={() => router.push(`/invoices/${invoice.id}`)}
-                          >
+                          <td className="px-6 py-4 whitespace-nowrap">
                             <StatusBadge status={invoice.status} />
                           </td>
-                          <td 
-                            className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 cursor-pointer"
-                            onClick={() => router.push(`/invoices/${invoice.id}`)}
-                          >
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             <DateLabel date={dueDate} />
                           </td>
-                          <td 
-                            className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 cursor-pointer"
-                            onClick={() => router.push(`/invoices/${invoice.id}`)}
-                          >
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             <DateLabel date={updatedDate} showTime />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                router.push(`/invoices/${invoice.id}?edit=1`);
-                              }}
-                              className="text-blue-600 hover:text-blue-800 font-medium"
-                            >
-                              Edit
-                            </button>
+                            <div className="flex items-center gap-2">
+                              {!isPaid && (
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={(e) => handleMarkPaid(invoice.id, e)}
+                                  className="h-7 text-xs"
+                                >
+                                  Mark Paid
+                                </Button>
+                              )}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/invoices/${invoice.id}?edit=1`);
+                                }}
+                                className="text-blue-600 hover:text-blue-800 font-medium text-sm"
+                              >
+                                Edit
+                              </button>
+                              <a
+                                href={`/invoices/${invoice.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/invoices/${invoice.id}`);
+                                }}
+                                className="text-blue-600 hover:text-blue-800 font-medium text-sm"
+                              >
+                                View
+                              </a>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -314,9 +383,21 @@ export default function DashboardPage() {
                 </tbody>
               </table>
             </div>
+            {result.hasMore && (
+              <div className="px-6 py-4 border-t border-gray-200 text-center">
+                <Button
+                  variant="secondary"
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? "Loading..." : "Load More"}
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </div>
+      {ToastComponent}
     </AppLayout>
   );
 }

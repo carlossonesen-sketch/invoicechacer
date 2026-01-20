@@ -1,6 +1,6 @@
 "use client";
 
-import { collection, query, where, orderBy, getDocs, onSnapshot, doc, onSnapshot as onDocSnapshot, updateDoc, Timestamp, serverTimestamp, addDoc, writeBatch, QuerySnapshot, DocumentData } from "firebase/firestore";
+import { collection, query, where, orderBy, limit, getDocs, onSnapshot, doc, onSnapshot as onDocSnapshot, updateDoc, Timestamp, serverTimestamp, addDoc, writeBatch, QuerySnapshot, DocumentData, QueryDocumentSnapshot, startAfter } from "firebase/firestore";
 import { db } from "./firebase";
 import { User } from "firebase/auth";
 
@@ -40,10 +40,12 @@ function convertSnapshotToInvoices(snapshot: QuerySnapshot<DocumentData>, user: 
   let hasMissingCreatedAt = false;
 
   snapshot.forEach((doc) => {
-    const data = doc.data();
+    // Use serverTimestamps: "estimate" to get estimated timestamps during pending window
+    const data = doc.data({ serverTimestamps: "estimate" });
     
-    // Check if createdAt is missing
-    if (!data.createdAt) {
+    // Check if createdAt is missing (dev-only log)
+    if (!data.createdAt && process.env.NODE_ENV !== "production") {
+      console.warn(`[Dev] Invoice ${doc.id} missing createdAt timestamp`);
       hasMissingCreatedAt = true;
     }
     
@@ -91,9 +93,15 @@ function convertSnapshotToInvoices(snapshot: QuerySnapshot<DocumentData>, user: 
   return invoices;
 }
 
+export interface InvoiceSubscriptionResult extends InvoiceQueryResult {
+  lastDoc?: QueryDocumentSnapshot;
+  hasMore?: boolean;
+}
+
 export function subscribeToUserInvoices(
   user: User,
-  callback: (result: InvoiceQueryResult) => void
+  callback: (result: InvoiceSubscriptionResult) => void,
+  pageLimit: number = 25
 ): () => void {
   if (!db) {
     callback({
@@ -108,7 +116,8 @@ export function subscribeToUserInvoices(
     const q = query(
       invoicesRef,
       where("userId", "==", user.uid),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
+      limit(pageLimit)
     );
 
     // Use onSnapshot for real-time updates
@@ -117,10 +126,14 @@ export function subscribeToUserInvoices(
       (snapshot) => {
         const invoices = convertSnapshotToInvoices(snapshot, user);
         const hasMissingCreatedAt = invoices.some(inv => !inv.createdAt || inv.createdAt === new Date().toISOString());
+        const lastDoc = snapshot.docs[snapshot.docs.length - 1];
+        const hasMore = snapshot.docs.length === pageLimit;
         
         callback({
           invoices,
           hasMissingCreatedAt,
+          lastDoc,
+          hasMore,
         });
       },
       (error: any) => {
@@ -157,6 +170,50 @@ export function subscribeToUserInvoices(
       error: error.message || "Failed to set up invoice subscription",
     });
     return () => {}; // Return empty unsubscribe function
+  }
+}
+
+/**
+ * Fetch next page of invoices for pagination
+ */
+export async function fetchNextPageOfInvoices(
+  user: User,
+  lastDoc: QueryDocumentSnapshot,
+  pageLimit: number = 25
+): Promise<InvoiceSubscriptionResult> {
+  if (!db) {
+    return {
+      invoices: [],
+      error: "Firebase not initialized. Please check your environment variables.",
+    };
+  }
+
+  try {
+    const invoicesRef = collection(db, "invoices");
+    const q = query(
+      invoicesRef,
+      where("userId", "==", user.uid),
+      orderBy("createdAt", "desc"),
+      startAfter(lastDoc),
+      limit(pageLimit)
+    );
+
+    const snapshot = await getDocs(q);
+    const invoices = convertSnapshotToInvoices(snapshot, user);
+    const nextLastDoc = snapshot.docs[snapshot.docs.length - 1];
+    const hasMore = snapshot.docs.length === pageLimit;
+
+    return {
+      invoices,
+      lastDoc: nextLastDoc,
+      hasMore,
+    };
+  } catch (error: any) {
+    console.error("Error fetching next page of invoices:", error);
+    return {
+      invoices: [],
+      error: error.message || "Failed to fetch invoices",
+    };
   }
 }
 
@@ -328,8 +385,12 @@ export async function createInvoicesBulk(
   return { success, failed, errors };
 }
 
-function convertDocToInvoice(docData: DocumentData, docId: string): FirestoreInvoice {
-  const data = docData;
+function convertDocToInvoice(docData: DocumentData, docId: string, useServerTimestampEstimate: boolean = false): FirestoreInvoice {
+  // If docData is a DocumentSnapshot, extract data with server timestamp estimate
+  let data = docData;
+  if (useServerTimestampEstimate && typeof (docData as any).data === "function") {
+    data = (docData as any).data({ serverTimestamps: "estimate" });
+  }
   
   const invoice: FirestoreInvoice = {
     id: docId,
@@ -390,7 +451,7 @@ export function subscribeToInvoice(
           callback(null, "Invoice not found");
           return;
         }
-        const invoice = convertDocToInvoice(snapshot.data(), snapshot.id);
+        const invoice = convertDocToInvoice(snapshot, snapshot.id, true);
         callback(invoice);
       },
       (error: any) => {
@@ -464,6 +525,22 @@ export async function updateInvoice(
   }
 
   await updateDoc(invoiceRef, updateData);
+}
+
+/**
+ * Mark an invoice as paid
+ */
+export async function markInvoicePaid(invoiceId: string): Promise<void> {
+  if (!db) {
+    throw new Error("Firebase not initialized. Please check your environment variables.");
+  }
+
+  const invoiceRef = doc(db, "invoices", invoiceId);
+
+  await updateDoc(invoiceRef, {
+    status: "paid",
+    updatedAt: serverTimestamp(),
+  });
 }
 
 export async function triggerChaseNow(invoiceId: string): Promise<void> {
