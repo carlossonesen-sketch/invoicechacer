@@ -7,8 +7,9 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard" },
   { name: "Invoices", href: "/invoices" },
   { name: "Import CSV", href: "/invoices/import" },
-  { name: "Business Profile", href: "/profile" },
+  { name: "Company Profile", href: "/settings/company" },
   { name: "Settings", href: "/settings" },
+  { name: "Billing", href: "/settings/billing" },
 ];
 
 export function Sidebar() {

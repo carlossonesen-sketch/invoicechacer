@@ -1,38 +1,29 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { entitlementsRepo } from "@/data/repositories";
+import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
+import { useEntitlements } from "@/hooks/useEntitlements";
+import { EntitlementsService } from "@/lib/entitlements";
 
 export default function SettingsPage() {
-  const [isPro, setIsPro] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const { isPro, loading } = useEntitlements();
   const [saving, setSaving] = useState(false);
-  const [isDev] = useState(process.env.NODE_ENV === "development");
+  const [isDev, setIsDev] = useState(false);
 
   useEffect(() => {
-    loadSettings();
+    const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1" || process.env.NODE_ENV !== "production";
+    setIsDev(devToolsEnabled);
   }, []);
 
-  async function loadSettings() {
-    try {
-      const pro = await entitlementsRepo.isPro();
-      setIsPro(pro);
-    } catch (error) {
-      console.error("Failed to load settings:", error);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleTogglePro() {
+  function handleTogglePro() {
     setSaving(true);
     try {
       const newValue = !isPro;
-      await entitlementsRepo.setProForDev(newValue);
-      setIsPro(newValue);
+      EntitlementsService.setPro(newValue);
     } catch (error) {
       console.error("Failed to update Pro status:", error);
       alert("Failed to update Pro status. Please try again.");
@@ -59,7 +50,12 @@ export default function SettingsPage() {
         <div className="max-w-2xl space-y-6">
           {/* Plan Card */}
           <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Plan</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Plan</h3>
+              <Button onClick={() => router.push("/settings/billing")}>
+                {isPro ? "Manage Billing" : "Upgrade to Pro"}
+              </Button>
+            </div>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium text-gray-900">
@@ -108,12 +104,12 @@ export default function SettingsPage() {
 
           {/* Billing Section */}
           <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Billing (Stripe)</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Billing</h3>
             <p className="text-sm text-gray-500 mb-4">
-              Stripe integration coming soon. Manage your subscription and payment methods here.
+              Manage your subscription, view invoices, and update payment methods.
             </p>
-            <Button variant="secondary" disabled>
-              Coming Soon
+            <Button onClick={() => router.push("/settings/billing")}>
+              Go to Billing
             </Button>
           </div>
 

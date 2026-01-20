@@ -4,8 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { entitlementsRepo } from "@/data/repositories";
 import { createInvoice } from "@/lib/invoices";
+import { dateInputToTimestamp } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -14,14 +14,18 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
+import { UpgradeModal } from "@/components/ui/upgrade-modal";
 import { isValidEmail, isValidUrl } from "@/lib/utils";
+import { useEntitlements } from "@/hooks/useEntitlements";
 import { User } from "firebase/auth";
 
 export default function NewInvoicePage() {
   const router = useRouter();
+  const { isPro } = useEntitlements();
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [isPro, setIsPro] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string>("");
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [user, setUser] = useState<User | null>(null);
 
   const [formData, setFormData] = useState<{
@@ -62,8 +66,6 @@ export default function NewInvoicePage() {
       setUser(currentUser);
     });
 
-    entitlementsRepo.isPro().then(setIsPro);
-
     return () => unsubscribe();
   }, [router]);
 
@@ -94,7 +96,8 @@ export default function NewInvoicePage() {
     }
 
     if (formData.autoChaseEnabled && !isPro) {
-      newErrors.autoChaseEnabled = "Auto-chase requires Pro plan";
+      setShowUpgradeModal(true);
+      return false;
     }
 
     setErrors(newErrors);
@@ -111,13 +114,23 @@ export default function NewInvoicePage() {
     }
 
     setLoading(true);
+    setErrors({});
+    setSuccessMessage("");
+    
     try {
       const amountCents = Math.round(parseFloat(formData.amount) * 100);
+      const dueTimestamp = dateInputToTimestamp(formData.dueDate);
+      if (!dueTimestamp) {
+        setErrors({ dueDate: "Due date is required" });
+        setLoading(false);
+        return;
+      }
+      
       const invoiceId = await createInvoice(user, {
         customerName: formData.customerName.trim(),
         customerEmail: formData.customerEmail.trim(),
         amount: amountCents,
-        dueAt: new Date(formData.dueDate).toISOString(),
+        dueAt: dueTimestamp.toDate().toISOString(),
         status: formData.status,
         notes: formData.notes.trim() || undefined,
         paymentLink: formData.paymentLink.trim() || undefined,
@@ -126,13 +139,18 @@ export default function NewInvoicePage() {
         maxChases: formData.maxChases,
       });
 
-      // Navigate to dashboard and refresh to see the new invoice
-      router.push("/dashboard");
-      router.refresh();
-    } catch (error) {
+      // Show success message briefly, then redirect to invoice detail page
+      setSuccessMessage("Invoice created successfully!");
+      
+      // Redirect after a short delay to show success message
+      setTimeout(() => {
+        router.push(`/invoices/${invoiceId}`);
+      }, 1000);
+    } catch (error: any) {
       console.error("Failed to create invoice:", error);
-      setErrors({ submit: "Failed to create invoice. Please try again." });
-    } finally {
+      setErrors({ 
+        submit: error.message || "Failed to create invoice. Please try again." 
+      });
       setLoading(false);
     }
   }
@@ -231,18 +249,36 @@ export default function NewInvoicePage() {
               </div>
             )}
 
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="autoChaseEnabled"
-                checked={formData.autoChaseEnabled && isPro}
-                disabled={!isPro}
-                onChange={(e) => setFormData({ ...formData, autoChaseEnabled: e.target.checked })}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              />
-              <label htmlFor="autoChaseEnabled" className="ml-2 block text-sm text-gray-900">
-                Enable auto-chase {!isPro && "(Pro)"}
-              </label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="autoChaseEnabled"
+                  checked={formData.autoChaseEnabled && isPro}
+                  disabled={!isPro}
+                  onChange={(e) => {
+                    if (e.target.checked && !isPro) {
+                      setShowUpgradeModal(true);
+                      return;
+                    }
+                    setFormData({ ...formData, autoChaseEnabled: e.target.checked });
+                  }}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="autoChaseEnabled" className="ml-2 block text-sm text-gray-900">
+                  Enable auto-chase {!isPro && "(Pro)"}
+                </label>
+              </div>
+              {!isPro && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowUpgradeModal(true)}
+                >
+                  Upgrade
+                </Button>
+              )}
             </div>
 
             {formData.autoChaseEnabled && isPro && (
@@ -272,6 +308,12 @@ export default function NewInvoicePage() {
             )}
           </div>
 
+          {successMessage && (
+            <div className="bg-green-50 border border-green-200 rounded-md p-4">
+              <p className="text-sm text-green-800">{successMessage}</p>
+            </div>
+          )}
+
           {errors.submit && (
             <div className="bg-red-50 border border-red-200 rounded-md p-4">
               <p className="text-sm text-red-800">{errors.submit}</p>
@@ -292,6 +334,12 @@ export default function NewInvoicePage() {
             </Button>
           </div>
         </form>
+
+        <UpgradeModal
+          isOpen={showUpgradeModal}
+          onClose={() => setShowUpgradeModal(false)}
+          message="Auto-chase is a Pro feature. Upgrade now to automatically send reminder emails to your customers."
+        />
       </div>
     </AppLayout>
   );

@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
-import { entitlementsRepo } from "@/data/repositories";
+import { dateInputToTimestamp, timestampToDateInput, formatDateOnly } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -16,21 +16,28 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { FormField } from "@/components/ui/form-field";
+import { UpgradeModal } from "@/components/ui/upgrade-modal";
 import { isValidEmail } from "@/lib/utils";
+import { useEntitlements } from "@/hooks/useEntitlements";
 
 export default function InvoiceDetailPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const invoiceId = params.id as string;
+
+  // Check if edit mode is requested via query parameter
+  const shouldStartEditing = searchParams.get("edit") === "1";
 
   const [invoice, setInvoice] = useState<FirestoreInvoice | null>(null);
   const [chaseEvents, setChaseEvents] = useState<ChaseEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(shouldStartEditing);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState<string>("");
-  const [isPro, setIsPro] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const { isPro } = useEntitlements();
   const [user, setUser] = useState<any>(null);
   const [isDev, setIsDev] = useState(false);
 
@@ -64,8 +71,6 @@ export default function InvoiceDetailPage() {
     const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1" || process.env.NODE_ENV !== "production";
     setIsDev(devToolsEnabled);
 
-    entitlementsRepo.isPro().then(setIsPro);
-
     const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) {
         router.push("/login");
@@ -89,11 +94,13 @@ export default function InvoiceDetailPage() {
           setInvoice(invoiceData);
           
           // Update form data when invoice loads or changes
-          const dueDate = typeof invoiceData.dueAt === "string" 
-            ? new Date(invoiceData.dueAt).toISOString().split("T")[0]
-            : invoiceData.dueAt?.toDate?.() 
-              ? new Date(invoiceData.dueAt.toDate()).toISOString().split("T")[0]
-              : "";
+          const dueDate = invoiceData.dueAt 
+            ? timestampToDateInput(
+                typeof invoiceData.dueAt === "string" 
+                  ? invoiceData.dueAt 
+                  : invoiceData.dueAt
+              )
+            : "";
           
           setFormData({
             customerName: invoiceData.customerName || "",
@@ -106,6 +113,11 @@ export default function InvoiceDetailPage() {
             maxChases: invoiceData.maxChases || 3,
           });
           setLoading(false);
+          
+          // Start in edit mode if requested via query parameter
+          if (shouldStartEditing) {
+            setIsEditing(true);
+          }
         }
       });
 
@@ -127,7 +139,7 @@ export default function InvoiceDetailPage() {
     return () => {
       authUnsubscribe();
     };
-  }, [invoiceId, router]);
+  }, [invoiceId, router, shouldStartEditing]);
 
   function validate(): boolean {
     const newErrors: Record<string, string> = {};
@@ -156,7 +168,8 @@ export default function InvoiceDetailPage() {
     }
 
     if (formData.autoChaseEnabled && !isPro) {
-      newErrors.autoChaseEnabled = "Auto-chase requires Pro plan";
+      setShowUpgradeModal(true);
+      return false;
     }
 
     setErrors(newErrors);
@@ -174,11 +187,18 @@ export default function InvoiceDetailPage() {
     try {
       const amountCents = Math.round(parseFloat(formData.amount) * 100);
       
+      const dueTimestamp = dateInputToTimestamp(formData.dueDate);
+      if (!dueTimestamp) {
+        setErrors({ dueDate: "Due date is required" });
+        setSaving(false);
+        return;
+      }
+      
       await updateInvoice(invoice.id, {
         customerName: formData.customerName.trim(),
         customerEmail: formData.customerEmail.trim(),
         amount: amountCents,
-        dueAt: new Date(formData.dueDate).toISOString(),
+        dueAt: dueTimestamp.toDate().toISOString(),
         status: formData.status,
         autoChaseEnabled: formData.autoChaseEnabled && isPro,
         autoChaseDays: formData.autoChaseDays,
@@ -247,9 +267,19 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  const dueDate = typeof invoice.dueAt === "string" 
-    ? new Date(invoice.dueAt) 
-    : invoice.dueAt?.toDate?.() || new Date();
+  // Convert dueAt to Date for display (using local timezone)
+  const getDueDate = () => {
+    if (!invoice.dueAt) return new Date();
+    if (typeof invoice.dueAt === "string") {
+      return new Date(invoice.dueAt);
+    }
+    if (invoice.dueAt?.toDate) {
+      return invoice.dueAt.toDate();
+    }
+    return new Date();
+  };
+  
+  const dueDateForDisplay = getDueDate();
 
   return (
     <AppLayout>
@@ -289,7 +319,7 @@ export default function InvoiceDetailPage() {
               <div>
                 <div className="text-gray-500">Due Date</div>
                 <div className="font-medium text-gray-900">
-                  <DateLabel date={dueDate} />
+                    <DateLabel date={dueDateForDisplay} />
                 </div>
               </div>
               <div>
@@ -406,18 +436,36 @@ export default function InvoiceDetailPage() {
                     </div>
                   )}
 
-                  <div className="flex items-center mb-4">
-                    <input
-                      type="checkbox"
-                      id="autoChaseEnabled"
-                      checked={formData.autoChaseEnabled && isPro}
-                      disabled={!isPro}
-                      onChange={(e) => setFormData({ ...formData, autoChaseEnabled: e.target.checked })}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="autoChaseEnabled" className="ml-2 block text-sm text-gray-900">
-                      Enable auto-chase {!isPro && "(Pro)"}
-                    </label>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        id="autoChaseEnabled"
+                        checked={formData.autoChaseEnabled && isPro}
+                        disabled={!isPro}
+                        onChange={(e) => {
+                          if (e.target.checked && !isPro) {
+                            setShowUpgradeModal(true);
+                            return;
+                          }
+                          setFormData({ ...formData, autoChaseEnabled: e.target.checked });
+                        }}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                      <label htmlFor="autoChaseEnabled" className="ml-2 block text-sm text-gray-900">
+                        Enable auto-chase {!isPro && "(Pro)"}
+                      </label>
+                    </div>
+                    {!isPro && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setShowUpgradeModal(true)}
+                      >
+                        Upgrade
+                      </Button>
+                    )}
                   </div>
 
                   {formData.autoChaseEnabled && isPro && (
@@ -512,7 +560,7 @@ export default function InvoiceDetailPage() {
                 <div>
                   <div className="text-sm text-gray-500">Due Date</div>
                   <div className="font-medium text-gray-900">
-                    <DateLabel date={dueDate} />
+                    <DateLabel date={dueDateForDisplay} />
                   </div>
                 </div>
                 <div>
@@ -678,6 +726,12 @@ export default function InvoiceDetailPage() {
             </div>
           </div>
         </div>
+
+        <UpgradeModal
+          isOpen={showUpgradeModal}
+          onClose={() => setShowUpgradeModal(false)}
+          message="Auto-chase is a Pro feature. Upgrade now to automatically send reminder emails to your customers."
+        />
       </div>
     </AppLayout>
   );

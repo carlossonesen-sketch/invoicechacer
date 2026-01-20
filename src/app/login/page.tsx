@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
 import { isValidEmail } from "@/lib/utils";
+import { getBusinessProfile } from "@/lib/businessProfile";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -79,7 +80,21 @@ export default function LoginPage() {
         throw new Error("Failed to create session");
       }
 
-      router.push("/");
+      // Check if user has completed company profile onboarding
+      try {
+        const profile = await getBusinessProfile(userCredential.user.uid);
+        if (!profile) {
+          // Redirect to onboarding if profile is missing
+          router.push("/onboarding/company");
+        } else {
+          // Redirect to dashboard if profile exists
+          router.push("/dashboard");
+        }
+      } catch (profileError) {
+        // If profile check fails, still redirect to dashboard
+        console.error("Failed to check business profile:", profileError);
+        router.push("/dashboard");
+      }
       router.refresh();
     } catch (err: any) {
       console.error("Auth error:", err);

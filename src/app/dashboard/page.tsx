@@ -12,11 +12,14 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Currency } from "@/components/ui/currency";
 import { DateLabel } from "@/components/ui/date-label";
+import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
+import { useEntitlements } from "@/hooks/useEntitlements";
 import { User } from "firebase/auth";
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { isPro } = useEntitlements();
   const [user, setUser] = useState<User | null>(null);
   const [result, setResult] = useState<InvoiceQueryResult>({ invoices: [] });
   const [loading, setLoading] = useState(true);
@@ -159,6 +162,23 @@ export default function DashboardPage() {
       <Header title="Dashboard" />
       <div className="flex-1 overflow-auto p-6">
         <div className="space-y-6">
+          {/* Upgrade Banner */}
+          {!isPro && (
+            <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-blue-900">Unlock Pro Features</h3>
+                  <p className="text-sm text-blue-700 mt-1">
+                    Get auto-chase emails, custom cadence, and priority support.
+                  </p>
+                </div>
+                <Button onClick={() => router.push("/settings/billing")} size="sm">
+                  Upgrade to Pro
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* KPI Cards */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -219,12 +239,15 @@ export default function DashboardPage() {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Updated
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {recentInvoices.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
+                      <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
                         No invoices yet
                       </td>
                     </tr>
@@ -240,24 +263,49 @@ export default function DashboardPage() {
                       return (
                         <tr
                           key={invoice.id}
-                          className="hover:bg-gray-50 cursor-pointer"
-                          onClick={() => router.push(`/invoices/${invoice.id}`)}
+                          className="hover:bg-gray-50"
                         >
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td 
+                            className="px-6 py-4 whitespace-nowrap cursor-pointer"
+                            onClick={() => router.push(`/invoices/${invoice.id}`)}
+                          >
                             <div className="text-sm font-medium text-gray-900">{invoice.customerName}</div>
                             <div className="text-sm text-gray-500">{invoice.customerEmail}</div>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td 
+                            className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 cursor-pointer"
+                            onClick={() => router.push(`/invoices/${invoice.id}`)}
+                          >
                             <Currency cents={invoice.amount || 0} />
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
+                          <td 
+                            className="px-6 py-4 whitespace-nowrap cursor-pointer"
+                            onClick={() => router.push(`/invoices/${invoice.id}`)}
+                          >
                             <StatusBadge status={invoice.status} />
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td 
+                            className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 cursor-pointer"
+                            onClick={() => router.push(`/invoices/${invoice.id}`)}
+                          >
                             <DateLabel date={dueDate} />
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <td 
+                            className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 cursor-pointer"
+                            onClick={() => router.push(`/invoices/${invoice.id}`)}
+                          >
                             <DateLabel date={updatedDate} showTime />
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/invoices/${invoice.id}?edit=1`);
+                              }}
+                              className="text-blue-600 hover:text-blue-800 font-medium"
+                            >
+                              Edit
+                            </button>
                           </td>
                         </tr>
                       );
