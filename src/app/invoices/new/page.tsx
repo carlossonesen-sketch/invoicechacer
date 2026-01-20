@@ -343,8 +343,6 @@ export default function NewInvoicePage() {
                       onClick={() => {
                         setSuccessMessage("");
                         setCreatedInvoiceId(null);
-                        router.replace("/invoices/new");
-                        router.refresh();
                       }}
                     >
                       Add Another

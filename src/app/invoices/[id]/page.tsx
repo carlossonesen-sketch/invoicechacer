@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, markInvoicePaid, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
+import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
 import { dateInputToTimestamp, timestampToDateInput, formatDateOnly } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
@@ -80,9 +80,12 @@ export default function InvoiceDetailPage() {
       }
       setUser(currentUser);
 
+      let invoiceUnsubscribe: (() => void) | null = null;
+      let chaseEventsUnsubscribe: (() => void) | null = null;
+
       // Subscribe to invoice
       setLoading(true);
-      const invoiceUnsubscribe = subscribeToInvoice(invoiceId, (invoiceData, error) => {
+      invoiceUnsubscribe = subscribeToInvoice(invoiceId, (invoiceData, error) => {
         if (error) {
           console.error("Invoice subscription error:", error);
           setLoading(false);
@@ -124,7 +127,7 @@ export default function InvoiceDetailPage() {
       });
 
       // Subscribe to chase events
-      const chaseEventsUnsubscribe = subscribeToChaseEvents(invoiceId, (events, error) => {
+      chaseEventsUnsubscribe = subscribeToChaseEvents(invoiceId, (events, error) => {
         if (error) {
           console.error("Chase events subscription error:", error);
           return;
@@ -133,14 +136,15 @@ export default function InvoiceDetailPage() {
       });
 
       return () => {
-        invoiceUnsubscribe();
-        chaseEventsUnsubscribe();
+        authUnsubscribe();
+        if (invoiceUnsubscribe) {
+          invoiceUnsubscribe();
+        }
+        if (chaseEventsUnsubscribe) {
+          chaseEventsUnsubscribe();
+        }
       };
     });
-
-    return () => {
-      authUnsubscribe();
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceId]); // Only depend on invoiceId to avoid re-subscribing
 
@@ -236,9 +240,8 @@ export default function InvoiceDetailPage() {
     setErrors({});
 
     try {
-      await markInvoicePaid(invoice.id);
-      setSuccessMessage("Marked paid");
-      router.refresh();
+      await updateInvoice(invoice.id, { status: "paid" });
+      setSuccessMessage("Marked as paid");
       setTimeout(() => setSuccessMessage(""), 3000);
     } catch (error: any) {
       console.error("Failed to mark invoice as paid:", error);
