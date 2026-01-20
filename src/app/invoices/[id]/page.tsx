@@ -1,0 +1,684 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useRouter, useParams } from "next/navigation";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
+import { entitlementsRepo } from "@/data/repositories";
+import { AutoChaseDays } from "@/domain/types";
+import { Header } from "@/components/layout/header";
+import { AppLayout } from "@/components/layout/app-layout";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { Currency } from "@/components/ui/currency";
+import { DateLabel } from "@/components/ui/date-label";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { FormField } from "@/components/ui/form-field";
+import { isValidEmail } from "@/lib/utils";
+
+export default function InvoiceDetailPage() {
+  const router = useRouter();
+  const params = useParams();
+  const invoiceId = params.id as string;
+
+  const [invoice, setInvoice] = useState<FirestoreInvoice | null>(null);
+  const [chaseEvents, setChaseEvents] = useState<ChaseEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [successMessage, setSuccessMessage] = useState<string>("");
+  const [isPro, setIsPro] = useState(false);
+  const [user, setUser] = useState<any>(null);
+  const [isDev, setIsDev] = useState(false);
+
+  const [formData, setFormData] = useState<{
+    customerName: string;
+    customerEmail: string;
+    amount: string;
+    dueDate: string;
+    status: "pending" | "overdue" | "paid";
+    autoChaseEnabled: boolean;
+    autoChaseDays: AutoChaseDays;
+    maxChases: number;
+  }>({
+    customerName: "",
+    customerEmail: "",
+    amount: "",
+    dueDate: "",
+    status: "pending",
+    autoChaseEnabled: false,
+    autoChaseDays: 3,
+    maxChases: 3,
+  });
+
+  useEffect(() => {
+    if (!auth) {
+      router.push("/login");
+      return;
+    }
+
+    // Check if dev tools are enabled
+    const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1" || process.env.NODE_ENV !== "production";
+    setIsDev(devToolsEnabled);
+
+    entitlementsRepo.isPro().then(setIsPro);
+
+    const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (!currentUser) {
+        router.push("/login");
+        return;
+      }
+      setUser(currentUser);
+
+      // Subscribe to invoice
+      setLoading(true);
+      const invoiceUnsubscribe = subscribeToInvoice(invoiceId, (invoiceData, error) => {
+        if (error) {
+          console.error("Invoice subscription error:", error);
+          setLoading(false);
+          if (error === "Invoice not found") {
+            router.push("/invoices");
+          }
+          return;
+        }
+
+        if (invoiceData) {
+          setInvoice(invoiceData);
+          
+          // Update form data when invoice loads or changes
+          const dueDate = typeof invoiceData.dueAt === "string" 
+            ? new Date(invoiceData.dueAt).toISOString().split("T")[0]
+            : invoiceData.dueAt?.toDate?.() 
+              ? new Date(invoiceData.dueAt.toDate()).toISOString().split("T")[0]
+              : "";
+          
+          setFormData({
+            customerName: invoiceData.customerName || "",
+            customerEmail: invoiceData.customerEmail || "",
+            amount: ((invoiceData.amount || 0) / 100).toFixed(2),
+            dueDate: dueDate,
+            status: invoiceData.status,
+            autoChaseEnabled: invoiceData.autoChaseEnabled || false,
+            autoChaseDays: (invoiceData.autoChaseDays as AutoChaseDays) || 3,
+            maxChases: invoiceData.maxChases || 3,
+          });
+          setLoading(false);
+        }
+      });
+
+      // Subscribe to chase events
+      const chaseEventsUnsubscribe = subscribeToChaseEvents(invoiceId, (events, error) => {
+        if (error) {
+          console.error("Chase events subscription error:", error);
+          return;
+        }
+        setChaseEvents(events);
+      });
+
+      return () => {
+        invoiceUnsubscribe();
+        chaseEventsUnsubscribe();
+      };
+    });
+
+    return () => {
+      authUnsubscribe();
+    };
+  }, [invoiceId, router]);
+
+  function validate(): boolean {
+    const newErrors: Record<string, string> = {};
+
+    if (!formData.customerName.trim()) {
+      newErrors.customerName = "Customer name is required";
+    }
+
+    if (!formData.customerEmail.trim()) {
+      newErrors.customerEmail = "Customer email is required";
+    } else if (!isValidEmail(formData.customerEmail)) {
+      newErrors.customerEmail = "Invalid email address";
+    }
+
+    const amount = parseFloat(formData.amount);
+    if (!formData.amount || isNaN(amount) || amount < 0) {
+      newErrors.amount = "Amount must be greater than or equal to 0";
+    }
+
+    if (!formData.dueDate) {
+      newErrors.dueDate = "Due date is required";
+    }
+
+    if (formData.maxChases < 0) {
+      newErrors.maxChases = "Max chases must be greater than or equal to 0";
+    }
+
+    if (formData.autoChaseEnabled && !isPro) {
+      newErrors.autoChaseEnabled = "Auto-chase requires Pro plan";
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!invoice || !validate()) return;
+
+    setSaving(true);
+    setSuccessMessage("");
+    setErrors({});
+
+    try {
+      const amountCents = Math.round(parseFloat(formData.amount) * 100);
+      
+      await updateInvoice(invoice.id, {
+        customerName: formData.customerName.trim(),
+        customerEmail: formData.customerEmail.trim(),
+        amount: amountCents,
+        dueAt: new Date(formData.dueDate).toISOString(),
+        status: formData.status,
+        autoChaseEnabled: formData.autoChaseEnabled && isPro,
+        autoChaseDays: formData.autoChaseDays,
+        maxChases: formData.maxChases,
+      });
+
+      setSuccessMessage("Invoice updated successfully!");
+      setIsEditing(false);
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccessMessage(""), 3000);
+    } catch (error: any) {
+      console.error("Failed to update invoice:", error);
+      setErrors({ submit: error.message || "Failed to update invoice. Please try again." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTriggerChase() {
+    if (!invoice) return;
+
+    setSaving(true);
+    setSuccessMessage("");
+    setErrors({});
+
+    try {
+      await triggerChaseNow(invoice.id);
+      setSuccessMessage("Chase triggered successfully! The cloud function will process it on its next run.");
+      setTimeout(() => setSuccessMessage(""), 5000);
+    } catch (error: any) {
+      console.error("Failed to trigger chase:", error);
+      setErrors({ submit: error.message || "Failed to trigger chase. Please try again." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <AppLayout>
+        <Header title="Invoice Details" />
+        <div className="flex-1 overflow-auto p-6">
+          <div className="text-gray-500">Loading...</div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (!invoice) {
+    return null;
+  }
+
+  // Check if user owns this invoice
+  if (user && invoice.userId && invoice.userId !== user.uid) {
+    return (
+      <AppLayout>
+        <Header title="Invoice Details" />
+        <div className="flex-1 overflow-auto p-6">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-2xl">
+            <h3 className="text-lg font-semibold text-red-900 mb-2">Access Denied</h3>
+            <p className="text-red-800">You don't have permission to view this invoice.</p>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const dueDate = typeof invoice.dueAt === "string" 
+    ? new Date(invoice.dueAt) 
+    : invoice.dueAt?.toDate?.() || new Date();
+
+  return (
+    <AppLayout>
+      <Header title="Invoice Details" />
+      <div className="flex-1 overflow-auto p-6">
+        <div className="max-w-4xl space-y-6">
+          {/* Breadcrumb/Back Link */}
+          <div>
+            <button
+              onClick={() => router.push("/dashboard")}
+              className="flex items-center text-sm text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <span className="mr-1">←</span>
+              Back to Dashboard
+            </button>
+          </div>
+
+          {/* Summary Header */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <div className="text-sm text-gray-500 mb-1">Invoice #{invoice.id}</div>
+                <div className="flex items-center gap-3 mb-2">
+                  <h2 className="text-2xl font-semibold text-gray-900">
+                    <Currency cents={invoice.amount || 0} />
+                  </h2>
+                  <StatusBadge status={invoice.status} />
+                </div>
+              </div>
+              {!isEditing && (
+                <Button variant="secondary" onClick={() => setIsEditing(true)}>
+                  Edit
+                </Button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <div className="text-gray-500">Due Date</div>
+                <div className="font-medium text-gray-900">
+                  <DateLabel date={dueDate} />
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-500">Customer Email</div>
+                <div className="font-medium text-gray-900">{invoice.customerEmail}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Success Message */}
+          {successMessage && (
+            <div className="bg-green-50 border border-green-200 rounded-md p-4">
+              <p className="text-sm text-green-800">{successMessage}</p>
+            </div>
+          )}
+
+          {/* Edit Form */}
+          {isEditing ? (
+            <form onSubmit={handleSave} className="space-y-6">
+              <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-gray-900">Edit Invoice</h3>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setIsEditing(false);
+                      setErrors({});
+                      // Reset form data to invoice values
+                      const dueDate = typeof invoice.dueAt === "string" 
+                        ? new Date(invoice.dueAt).toISOString().split("T")[0]
+                        : invoice.dueAt?.toDate?.() 
+                          ? new Date(invoice.dueAt.toDate()).toISOString().split("T")[0]
+                          : "";
+                      setFormData({
+                        customerName: invoice.customerName || "",
+                        customerEmail: invoice.customerEmail || "",
+                        amount: ((invoice.amount || 0) / 100).toFixed(2),
+                        dueDate: dueDate,
+                        status: invoice.status,
+                        autoChaseEnabled: invoice.autoChaseEnabled || false,
+                        autoChaseDays: (invoice.autoChaseDays as AutoChaseDays) || 3,
+                        maxChases: invoice.maxChases || 3,
+                      });
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+
+                <FormField label="Customer Name" htmlFor="customerName" required error={errors.customerName}>
+                  <Input
+                    id="customerName"
+                    value={formData.customerName}
+                    onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
+                    error={!!errors.customerName}
+                  />
+                </FormField>
+
+                <FormField label="Customer Email" htmlFor="customerEmail" required error={errors.customerEmail}>
+                  <Input
+                    id="customerEmail"
+                    type="email"
+                    value={formData.customerEmail}
+                    onChange={(e) => setFormData({ ...formData, customerEmail: e.target.value })}
+                    error={!!errors.customerEmail}
+                  />
+                </FormField>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField label="Amount (USD)" htmlFor="amount" required error={errors.amount}>
+                    <Input
+                      id="amount"
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={formData.amount}
+                      onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                      error={!!errors.amount}
+                    />
+                  </FormField>
+
+                  <FormField label="Due Date" htmlFor="dueDate" required error={errors.dueDate}>
+                    <Input
+                      id="dueDate"
+                      type="date"
+                      value={formData.dueDate}
+                      onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                      error={!!errors.dueDate}
+                    />
+                  </FormField>
+                </div>
+
+                <FormField label="Status" htmlFor="status">
+                  <Select
+                    id="status"
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value as "pending" | "overdue" | "paid" })}
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="overdue">Overdue</option>
+                    <option value="paid">Paid</option>
+                  </Select>
+                </FormField>
+
+                {/* Auto-Chase Settings */}
+                <div className="pt-4 border-t border-gray-200">
+                  <h4 className="text-md font-semibold text-gray-900 mb-4">Auto-Chase Settings</h4>
+                  {!isPro && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4 mb-4">
+                      <p className="text-sm text-yellow-800">
+                        Auto-chase is available on the Pro plan. Enable Pro in Settings to use this feature.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="flex items-center mb-4">
+                    <input
+                      type="checkbox"
+                      id="autoChaseEnabled"
+                      checked={formData.autoChaseEnabled && isPro}
+                      disabled={!isPro}
+                      onChange={(e) => setFormData({ ...formData, autoChaseEnabled: e.target.checked })}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="autoChaseEnabled" className="ml-2 block text-sm text-gray-900">
+                      Enable auto-chase {!isPro && "(Pro)"}
+                    </label>
+                  </div>
+
+                  {formData.autoChaseEnabled && isPro && (
+                    <>
+                      <FormField label="Chase Cadence (days)" htmlFor="autoChaseDays">
+                        <Select
+                          id="autoChaseDays"
+                          value={formData.autoChaseDays}
+                          onChange={(e) => setFormData({ ...formData, autoChaseDays: parseInt(e.target.value) as AutoChaseDays })}
+                        >
+                          <option value="3">3 days</option>
+                          <option value="5">5 days</option>
+                          <option value="7">7 days</option>
+                        </Select>
+                      </FormField>
+
+                      <FormField label="Max Chases" htmlFor="maxChases" error={errors.maxChases}>
+                        <Input
+                          id="maxChases"
+                          type="number"
+                          min="0"
+                          value={formData.maxChases}
+                          onChange={(e) => setFormData({ ...formData, maxChases: parseInt(e.target.value) || 0 })}
+                          error={!!errors.maxChases}
+                        />
+                      </FormField>
+                    </>
+                  )}
+
+                  {/* Dev-only trigger button in edit mode */}
+                  {isDev && formData.autoChaseEnabled && isPro && (
+                    <div className="pt-4 border-t border-gray-200">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={handleTriggerChase}
+                        disabled={saving}
+                      >
+                        {saving ? "Triggering..." : "Trigger Chase Now (Dev)"}
+                      </Button>
+                      <p className="mt-2 text-xs text-gray-500">
+                        Sets triggerChaseAt and chaseRequested flag. Cloud function will process on next run.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {errors.submit && (
+                <div className="bg-red-50 border border-red-200 rounded-md p-4">
+                  <p className="text-sm text-red-800">{errors.submit}</p>
+                </div>
+              )}
+
+              <div className="flex gap-4">
+                <Button type="submit" disabled={saving}>
+                  {saving ? "Saving..." : "Save Changes"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setIsEditing(false);
+                    setErrors({});
+                  }}
+                  disabled={saving}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          ) : (
+            /* View Mode */
+            <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+              <h3 className="text-lg font-semibold text-gray-900">Invoice Details</h3>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-sm text-gray-500">Customer Name</div>
+                  <div className="font-medium text-gray-900">{invoice.customerName}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Customer Email</div>
+                  <div className="font-medium text-gray-900">{invoice.customerEmail}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Amount</div>
+                  <div className="font-medium text-gray-900">
+                    <Currency cents={invoice.amount || 0} />
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Due Date</div>
+                  <div className="font-medium text-gray-900">
+                    <DateLabel date={dueDate} />
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Status</div>
+                  <div className="font-medium text-gray-900">
+                    <StatusBadge status={invoice.status} />
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Created At</div>
+                  <div className="font-medium text-gray-900">
+                    <DateLabel 
+                      date={typeof invoice.createdAt === "string" 
+                        ? new Date(invoice.createdAt) 
+                        : invoice.createdAt?.toDate?.() || new Date()} 
+                      showTime 
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {invoice.notes && (
+                <div>
+                  <div className="text-sm text-gray-500 mb-1">Notes</div>
+                  <div className="text-gray-900">{invoice.notes}</div>
+                </div>
+              )}
+
+              {invoice.paymentLink && (
+                <div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => window.open(invoice.paymentLink!, "_blank")}
+                  >
+                    Test Payment Link
+                  </Button>
+                </div>
+              )}
+
+              {/* Auto-Chase Info */}
+              <div className="pt-4 border-t border-gray-200">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-md font-semibold text-gray-900">Auto-Chase Settings</h4>
+                  {isDev && invoice.autoChaseEnabled && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleTriggerChase}
+                      disabled={saving}
+                    >
+                      {saving ? "Triggering..." : "Trigger Chase Now (Dev)"}
+                    </Button>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <div className="text-sm text-gray-500">Enabled</div>
+                    <div className="font-medium text-gray-900">
+                      {invoice.autoChaseEnabled ? "Yes" : "No"}
+                    </div>
+                  </div>
+                  {invoice.autoChaseEnabled && (
+                    <>
+                      <div>
+                        <div className="text-sm text-gray-500">Cadence</div>
+                        <div className="font-medium text-gray-900">
+                          {invoice.autoChaseDays || 3} days
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-500">Max Chases</div>
+                        <div className="font-medium text-gray-900">{invoice.maxChases || 3}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-500">Chase Count</div>
+                        <div className="font-medium text-gray-900">{invoice.chaseCount || 0}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-500">Last Chased</div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {invoice.lastChasedAt ? (
+                            <DateLabel date={typeof invoice.lastChasedAt === "string" ? new Date(invoice.lastChasedAt) : invoice.lastChasedAt?.toDate?.() || new Date()} showTime />
+                          ) : (
+                            <span className="text-gray-400">Never</span>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-500">Next Chase</div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {invoice.nextChaseAt ? (
+                            <DateLabel date={typeof invoice.nextChaseAt === "string" ? new Date(invoice.nextChaseAt) : invoice.nextChaseAt?.toDate?.() || new Date()} showTime />
+                          ) : (
+                            <span className="text-gray-400">—</span>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Chase History */}
+          <div className="bg-white rounded-lg border border-gray-200">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Chase History</h3>
+            </div>
+            <div className="overflow-x-auto">
+              {chaseEvents.length === 0 ? (
+                <div className="px-6 py-4 text-center text-gray-500">
+                  No chase events yet
+                </div>
+              ) : (
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Date
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Sent To
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Type
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {chaseEvents.map((event) => (
+                      <tr key={event.id}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <DateLabel date={new Date(event.createdAt)} showTime />
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {event.toEmail}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {event.type}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {event.dryRun ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200">
+                              Test
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                              Sent
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </AppLayout>
+  );
+}

@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "invoicechaser-crsac"
+  },
+  "targets": {
+    "invoicechaser-crsac": {
+      "hosting": {
+        "web": [
+          "invoicechaser-crsac-923ff"
+        ]
+      }
+    }
+  }
+}

@@ -1,65 +1,164 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import { invoiceRepo } from "@/data/repositories";
+import { Invoice } from "@/domain/types";
+import { Header } from "@/components/layout/header";
+import { AppLayout } from "@/components/layout/app-layout";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { Currency } from "@/components/ui/currency";
+import { DateLabel } from "@/components/ui/date-label";
+import { formatCurrency } from "@/lib/utils";
+
+export default function Dashboard() {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  async function loadData() {
+    try {
+      const all = await invoiceRepo.list();
+      setInvoices(all);
+    } catch (error) {
+      console.error("Failed to load invoices:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Calculate KPIs
+  const today = new Date();
+  const last30Days = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const outstanding = invoices
+    .filter((inv) => inv.status === "pending")
+    .reduce((sum, inv) => sum + inv.amountCents, 0);
+
+  const overdue = invoices
+    .filter((inv) => inv.status === "overdue" || (inv.status === "pending" && new Date(inv.dueAt) < today))
+    .reduce((sum, inv) => sum + inv.amountCents, 0);
+
+  const paidLast30Days = invoices
+    .filter((inv) => inv.status === "paid" && new Date(inv.updatedAt) >= last30Days)
+    .reduce((sum, inv) => sum + inv.amountCents, 0);
+
+  const totalInvoices = invoices.length;
+
+  // Get recently updated invoices (last 10)
+  const recentInvoices = invoices
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, 10);
+
+  if (loading) {
+    return (
+      <>
+        <Header title="Dashboard" />
+        <div className="flex-1 overflow-auto p-6">
+          <div className="text-gray-500">Loading...</div>
+        </div>
+      </>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <AppLayout>
+      <Header title="Dashboard" />
+      <div className="flex-1 overflow-auto p-6">
+        <div className="space-y-6">
+          {/* KPI Cards */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <div className="text-sm font-medium text-gray-500">Outstanding</div>
+              <div className="mt-2 text-2xl font-semibold text-gray-900">
+                {formatCurrency(outstanding)}
+              </div>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <div className="text-sm font-medium text-gray-500">Overdue</div>
+              <div className="mt-2 text-2xl font-semibold text-red-600">
+                {formatCurrency(overdue)}
+              </div>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <div className="text-sm font-medium text-gray-500">Paid (Last 30 days)</div>
+              <div className="mt-2 text-2xl font-semibold text-green-600">
+                {formatCurrency(paidLast30Days)}
+              </div>
+            </div>
+            <div className="bg-white rounded-lg border border-gray-200 p-6">
+              <div className="text-sm font-medium text-gray-500">Total Invoices</div>
+              <div className="mt-2 text-2xl font-semibold text-gray-900">{totalInvoices}</div>
+            </div>
+          </div>
+
+          {/* Recently Updated Invoices */}
+          <div className="bg-white rounded-lg border border-gray-200">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Recently Updated Invoices</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Customer
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Amount
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Due Date
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Updated
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {recentInvoices.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-4 text-center text-gray-500">
+                        No invoices yet
+                      </td>
+                    </tr>
+                  ) : (
+                    recentInvoices.map((invoice) => (
+                      <tr
+                        key={invoice.id}
+                        className="hover:bg-gray-50 cursor-pointer"
+                        onClick={() => (window.location.href = `/invoices/${invoice.id}`)}
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{invoice.customerName}</div>
+                          <div className="text-sm text-gray-500">{invoice.customerEmail}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <Currency cents={invoice.amountCents} />
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <StatusBadge status={invoice.status} />
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <DateLabel date={invoice.dueAt} />
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <DateLabel date={invoice.updatedAt} showTime />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </div>
+    </AppLayout>
   );
 }

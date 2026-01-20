@@ -1,0 +1,17 @@
+{
+  "hosting": {
+    "site": "invoicechaser-crsac-923ff",
+    "public": "out",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
