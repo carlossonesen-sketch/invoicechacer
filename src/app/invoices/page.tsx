@@ -143,10 +143,25 @@ export default function InvoicesPage() {
     }
   }, [showToast]);
 
+  const handleNewInvoice = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    router.push("/invoices/new");
+  }, [router]);
+
+  const handleImport = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    router.push("/invoices/import");
+  }, [router]);
+
   return (
     <AppLayout>
       <Header title="Invoices">
-        <Button onClick={() => router.push("/invoices/new")}>New Invoice</Button>
+        <Button onClick={handleImport} variant="secondary">
+          Import CSV
+        </Button>
+        <Button onClick={handleNewInvoice}>New Invoice</Button>
       </Header>
       <div className="flex-1 overflow-auto p-6">
         <div className="space-y-4">
