@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { invoiceRepo } from "@/data/repositories";
-import { Invoice, InvoiceStatus } from "@/domain/types";
-import { markInvoicePaid } from "@/lib/invoices";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { subscribeToUserInvoices, fetchNextPageOfInvoices, markInvoicePaid, FirestoreInvoice, InvoiceSubscriptionResult } from "@/lib/invoices";
+import { QueryDocumentSnapshot } from "firebase/firestore";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -14,42 +15,128 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { User } from "firebase/auth";
 
 export default function InvoicesPage() {
   const router = useRouter();
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "overdue" | "paid">("all");
+  const [allInvoices, setAllInvoices] = useState<FirestoreInvoice[]>([]);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | undefined>(undefined);
+  const [hasMore, setHasMore] = useState(false);
+  const invoiceUnsubscribeRef = useRef<(() => void) | null>(null);
   const { showToast, ToastComponent } = useToast();
 
   useEffect(() => {
-    loadInvoices();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, statusFilter]);
-
-  async function loadInvoices() {
-    try {
-      setLoading(true);
-      const results = await invoiceRepo.list({
-        search: search || undefined,
-        status: statusFilter,
-      });
-      setInvoices(results);
-    } catch (error) {
-      console.error("Failed to load invoices:", error);
-    } finally {
-      setLoading(false);
+    if (!auth) {
+      router.push("/login");
+      return;
     }
-  }
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (!currentUser) {
+        router.push("/login");
+        return;
+      }
+      setUser(currentUser);
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    setLoading(true);
+    setAllInvoices([]);
+    
+    // Clean up previous subscription
+    if (invoiceUnsubscribeRef.current) {
+      invoiceUnsubscribeRef.current();
+    }
+
+    // Set up real-time subscription - ALWAYS includes userId filter
+    const unsubscribe = subscribeToUserInvoices(user, (result: InvoiceSubscriptionResult) => {
+      if (result.error) {
+        console.error("Error loading invoices:", result.error);
+        setLoading(false);
+        return;
+      }
+      
+      setAllInvoices(result.invoices || []);
+      setLastDoc(result.lastDoc);
+      setHasMore(result.hasMore || false);
+      setLoading(false);
+    }, 25); // Limit to 25 invoices initially
+
+    invoiceUnsubscribeRef.current = unsubscribe;
+
+    return () => {
+      unsubscribe();
+    };
+  }, [user]);
+
+  // Filter invoices client-side (since we already have userId filter from query)
+  const filteredInvoices = useMemo(() => {
+    let filtered = allInvoices;
+
+    // Apply search filter
+    if (search.trim()) {
+      const searchLower = search.toLowerCase();
+      filtered = filtered.filter(inv => 
+        inv.customerName.toLowerCase().includes(searchLower) ||
+        inv.customerEmail.toLowerCase().includes(searchLower) ||
+        inv.id.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Apply status filter (including computed overdue)
+    if (statusFilter !== "all") {
+      const now = new Date();
+      filtered = filtered.filter(inv => {
+        if (statusFilter === "overdue") {
+          // Compute overdue: dueAt < now AND status != "paid"
+          const dueDate = typeof inv.dueAt === "string" ? new Date(inv.dueAt) : inv.dueAt.toDate();
+          return inv.status !== "paid" && dueDate < now;
+        }
+        return inv.status === statusFilter;
+      });
+    }
+
+    return filtered;
+  }, [allInvoices, search, statusFilter]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (!user || !lastDoc || loadingMore || !hasMore) return;
+
+    setLoadingMore(true);
+    try {
+      const result = await fetchNextPageOfInvoices(user, lastDoc, 25);
+      if (result.error) {
+        console.error("Error loading more invoices:", result.error);
+        showToast("Failed to load more invoices", "error");
+      } else {
+        setAllInvoices(prev => [...prev, ...(result.invoices || [])]);
+        setLastDoc(result.lastDoc);
+        setHasMore(result.hasMore || false);
+      }
+    } catch (error: any) {
+      console.error("Error loading more invoices:", error);
+      showToast(error.message || "Failed to load more invoices", "error");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [user, lastDoc, loadingMore, hasMore, showToast]);
 
   const handleMarkPaid = useCallback(async (invoiceId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
       await markInvoicePaid(invoiceId);
       showToast("Marked paid");
-      // Reload invoices to reflect the change
-      loadInvoices();
+      // Invoices will update automatically via real-time subscription
     } catch (error: any) {
       console.error("Failed to mark invoice as paid:", error);
       showToast(error.message || "Failed to mark as paid", "error");
@@ -59,15 +146,7 @@ export default function InvoicesPage() {
   return (
     <AppLayout>
       <Header title="Invoices">
-        <Button 
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            router.push("/invoices/new");
-          }}
-        >
-          New Invoice
-        </Button>
+        <Button onClick={() => router.push("/invoices/new")}>New Invoice</Button>
       </Header>
       <div className="flex-1 overflow-auto p-6">
         <div className="space-y-4">
@@ -93,7 +172,7 @@ export default function InvoicesPage() {
                 <Select
                   id="status"
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as InvoiceStatus | "all")}
+                  onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
                 >
                   <option value="all">All</option>
                   <option value="pending">Pending</option>
@@ -140,14 +219,14 @@ export default function InvoicesPage() {
                         Loading...
                       </td>
                     </tr>
-                  ) : invoices.length === 0 ? (
+                  ) : filteredInvoices.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
                         No invoices found
                       </td>
                     </tr>
                   ) : (
-                    invoices.map((invoice) => {
+                    filteredInvoices.map((invoice) => {
                       const isPaid = invoice.status === "paid";
                       return (
                         <tr
@@ -160,13 +239,13 @@ export default function InvoicesPage() {
                             <div className="text-sm text-gray-500">{invoice.customerEmail}</div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            <Currency cents={invoice.amountCents} />
+                            <Currency cents={invoice.amount} />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <StatusBadge status={invoice.status} />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <DateLabel date={invoice.dueAt} />
+                            <DateLabel date={typeof invoice.dueAt === "string" ? invoice.dueAt : invoice.dueAt.toDate().toISOString()} />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {invoice.autoChaseEnabled ? (
@@ -179,7 +258,7 @@ export default function InvoicesPage() {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {invoice.nextChaseAt ? (
-                              <DateLabel date={invoice.nextChaseAt} />
+                              <DateLabel date={typeof invoice.nextChaseAt === "string" ? invoice.nextChaseAt : invoice.nextChaseAt.toDate().toISOString()} />
                             ) : (
                               <span className="text-gray-400">—</span>
                             )}
@@ -215,6 +294,19 @@ export default function InvoicesPage() {
                 </tbody>
               </table>
             </div>
+            
+            {/* Load More Button */}
+            {!loading && hasMore && (
+              <div className="px-6 py-4 border-t border-gray-200 text-center">
+                <Button
+                  variant="secondary"
+                  onClick={handleLoadMore}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? "Loading..." : "Load More"}
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </div>

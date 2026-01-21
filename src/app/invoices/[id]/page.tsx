@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { useRouter, useParams, useSearchParams, usePathname } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
+import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, markInvoicePaid, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
 import { dateInputToTimestamp, timestampToDateInput, formatDateOnly } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
@@ -33,6 +33,7 @@ export default function InvoiceDetailPage() {
   const [invoice, setInvoice] = useState<FirestoreInvoice | null>(null);
   const [chaseEvents, setChaseEvents] = useState<ChaseEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(shouldStartEditing);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -80,20 +81,23 @@ export default function InvoiceDetailPage() {
       }
       setUser(currentUser);
 
-      let invoiceUnsubscribe: (() => void) | null = null;
-      let chaseEventsUnsubscribe: (() => void) | null = null;
-
       // Subscribe to invoice
       setLoading(true);
-      invoiceUnsubscribe = subscribeToInvoice(invoiceId, (invoiceData, error) => {
+      let chaseEventsUnsubscribe: (() => void) | null = null;
+      
+      const invoiceUnsubscribe = subscribeToInvoice(invoiceId, (invoiceData, error) => {
         if (error) {
           console.error("Invoice subscription error:", error);
           setLoading(false);
-          if (error === "Invoice not found") {
-            router.push("/invoices");
-          }
+          setInvoice(null);
+          setChaseEvents([]);
+          setError(error);
+          // Don't attempt chaseEvents subscription if invoice subscription fails
           return;
         }
+        
+        // Clear error on success
+        setError(null);
 
         if (invoiceData) {
           setInvoice(invoiceData);
@@ -123,28 +127,32 @@ export default function InvoiceDetailPage() {
           if (shouldStartEditing) {
             setIsEditing(true);
           }
+          
+          // Only subscribe to chase events if invoice subscription succeeded
+          // This prevents permission errors from propagating
+          if (!chaseEventsUnsubscribe) {
+            chaseEventsUnsubscribe = subscribeToChaseEvents(invoiceId, (events, error) => {
+              if (error) {
+                console.error("Chase events subscription error:", error);
+                return;
+              }
+              setChaseEvents(events);
+            });
+          }
         }
-      });
-
-      // Subscribe to chase events
-      chaseEventsUnsubscribe = subscribeToChaseEvents(invoiceId, (events, error) => {
-        if (error) {
-          console.error("Chase events subscription error:", error);
-          return;
-        }
-        setChaseEvents(events);
       });
 
       return () => {
-        authUnsubscribe();
-        if (invoiceUnsubscribe) {
-          invoiceUnsubscribe();
-        }
+        invoiceUnsubscribe();
         if (chaseEventsUnsubscribe) {
           chaseEventsUnsubscribe();
         }
       };
     });
+
+    return () => {
+      authUnsubscribe();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceId]); // Only depend on invoiceId to avoid re-subscribing
 
@@ -240,8 +248,9 @@ export default function InvoiceDetailPage() {
     setErrors({});
 
     try {
-      await updateInvoice(invoice.id, { status: "paid" });
-      setSuccessMessage("Marked as paid");
+      await markInvoicePaid(invoice.id);
+      setSuccessMessage("Marked paid");
+      router.refresh();
       setTimeout(() => setSuccessMessage(""), 3000);
     } catch (error: any) {
       console.error("Failed to mark invoice as paid:", error);
@@ -281,8 +290,26 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  if (!invoice) {
-    return null;
+  if (error || !invoice) {
+    const isPermissionError = error?.includes("Permission denied") || error?.includes("don't have access");
+    return (
+      <AppLayout>
+        <Header title="Invoice Details" />
+        <div className="flex-1 overflow-auto p-6">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-2xl">
+            <h3 className="text-lg font-semibold text-red-900 mb-2">
+              {isPermissionError ? "Access Denied" : "Error Loading Invoice"}
+            </h3>
+            <p className="text-red-800 mb-4">
+              {error || "You don't have access to this invoice (or it no longer exists)."}
+            </p>
+            <Button onClick={() => router.push("/invoices")} variant="secondary">
+              Back to Invoices
+            </Button>
+          </div>
+        </div>
+      </AppLayout>
+    );
   }
 
   // Check if user owns this invoice
@@ -320,16 +347,7 @@ export default function InvoiceDetailPage() {
           {/* Breadcrumb/Back Link */}
           <div>
             <button
-              onClick={() => {
-                // Button click redirect - always allowed (user-initiated)
-                const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-                if (devToolsEnabled) {
-                  const pathname = typeof window !== "undefined" ? window.location.pathname : "server";
-                  console.log(`[InvoiceDetail] Back button clicked, redirecting to /dashboard from pathname: ${pathname}`);
-                  console.trace("InvoiceDetail -> Dashboard redirect (button)");
-                }
-                router.push("/dashboard");
-              }}
+              onClick={() => router.push("/dashboard")}
               className="flex items-center text-sm text-gray-600 hover:text-gray-900 transition-colors"
             >
               <span className="mr-1">←</span>

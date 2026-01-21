@@ -1,15 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { startTrial } from "@/lib/billing";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
-
-type PlanId = "starter" | "pro" | "business";
 
 const tiers = [
   {
@@ -50,11 +48,10 @@ const tiers = [
 
 export default function TrialPage() {
   const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedPlan, setSelectedPlan] = useState<PlanId>("starter");
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string>("");
 
@@ -78,6 +75,11 @@ export default function TrialPage() {
   }, [router, searchParams]);
 
   async function handleStartTrial() {
+    if (!selectedPlan) {
+      setError("Please select a plan");
+      return;
+    }
+
     if (!user) {
       router.push("/login?redirect=/trial");
       return;
@@ -97,24 +99,9 @@ export default function TrialPage() {
       localStorage.setItem("invoicechaser_trialEndsAt", trialEnd.toISOString());
 
       // Call Firestore-ready stub function
-      await startTrial(user.uid, selectedPlan);
-
-      // PATHNAME GUARD: Only redirect to dashboard if we're on the trial page
-      if (pathname !== "/trial") {
-        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-        if (devToolsEnabled) {
-          console.warn(`[Trial] BLOCKED redirect to /dashboard - pathname is ${pathname}, not /trial`);
-          console.trace("Redirect blocked");
-        }
-        return;
-      }
+      await startTrial(user.uid, selectedPlan as "starter" | "pro" | "business");
 
       // Redirect to dashboard
-      const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-      if (devToolsEnabled) {
-        console.log(`[Trial] Redirecting to /dashboard from pathname: ${pathname}`);
-        console.trace("Trial -> Dashboard redirect");
-      }
       router.push("/dashboard");
     } catch (err: any) {
       console.error("Failed to start trial:", err);
@@ -162,7 +149,7 @@ export default function TrialPage() {
             {tiers.map((tier) => (
               <div
                 key={tier.id}
-                onClick={() => setSelectedPlan(tier.id as PlanId)}
+                onClick={() => setSelectedPlan(tier.id)}
                 className={`bg-white rounded-lg border-2 p-6 cursor-pointer transition-all ${
                   selectedPlan === tier.id
                     ? "border-blue-500 shadow-lg"
@@ -222,7 +209,7 @@ export default function TrialPage() {
           <div className="text-center">
             <Button
               onClick={handleStartTrial}
-              disabled={starting}
+              disabled={!selectedPlan || starting}
               size="lg"
             >
               {starting ? "Starting trial..." : "Start free trial"}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -9,11 +9,78 @@ import { useEntitlements } from "@/hooks/useEntitlements";
 import { EntitlementsService } from "@/lib/entitlements";
 import Link from "next/link";
 
+type PlanId = "starter" | "pro" | "business" | "free";
+
+const planLimits: Record<PlanId, {
+  invoices: string;
+  activeChases: string;
+  emailsPerMonth: string;
+  maxReminders: string;
+  autoStopDays: number;
+}> = {
+  free: {
+    invoices: "Unlimited",
+    activeChases: "0",
+    emailsPerMonth: "0",
+    maxReminders: "0",
+    autoStopDays: 60,
+  },
+  starter: {
+    invoices: "50",
+    activeChases: "25",
+    emailsPerMonth: "500",
+    maxReminders: "5",
+    autoStopDays: 60,
+  },
+  pro: {
+    invoices: "200",
+    activeChases: "100",
+    emailsPerMonth: "2,000",
+    maxReminders: "10",
+    autoStopDays: 60,
+  },
+  business: {
+    invoices: "Unlimited",
+    activeChases: "Unlimited",
+    emailsPerMonth: "10,000",
+    maxReminders: "15",
+    autoStopDays: 60,
+  },
+};
+
+const planPrices: Record<PlanId, number> = {
+  free: 0,
+  starter: 10,
+  pro: 25,
+  business: 79,
+};
+
 export default function BillingPage() {
   const router = useRouter();
   const { isPro, loading } = useEntitlements();
   const [isDev, setIsDev] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
+  
+  // Determine current plan
+  const currentPlan = useMemo<PlanId>(() => {
+    if (typeof window === "undefined") return "free";
+    
+    // Check localStorage for selected plan (from trial)
+    const selectedPlan = localStorage.getItem("invoicechaser_selectedPlan") as PlanId | null;
+    if (selectedPlan && (selectedPlan === "starter" || selectedPlan === "pro" || selectedPlan === "business")) {
+      return selectedPlan;
+    }
+    
+    // Legacy: check isPro flag
+    if (isPro) {
+      return "pro"; // Default pro if isPro is true but no selectedPlan
+    }
+    
+    return "free";
+  }, [isPro]);
+  
+  const planLimitsData = planLimits[currentPlan];
+  const planPrice = planPrices[currentPlan];
 
   useEffect(() => {
     const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1" || process.env.NODE_ENV !== "production";
@@ -69,6 +136,59 @@ export default function BillingPage() {
               <span className="mr-1">←</span>
               Back to Settings
             </button>
+          </div>
+
+          {/* Current Plan */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Current Plan</h2>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <div className="text-2xl font-bold text-gray-900">{currentPlan === "free" ? "Free" : currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1)}</div>
+                <div className="text-sm text-gray-500 mt-1">
+                  {currentPlan === "free" ? "No charge" : `$${planPrice}/month`}
+                </div>
+              </div>
+            </div>
+            
+            {/* Plan Limits */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-gray-900">Plan Limits</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-sm text-gray-500">Unpaid Invoices</div>
+                  <div className="text-lg font-semibold text-gray-900">{planLimitsData.invoices}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Active Auto-Chases</div>
+                  <div className="text-lg font-semibold text-gray-900">{planLimitsData.activeChases}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Auto-Emails per Month</div>
+                  <div className="text-lg font-semibold text-gray-900">{planLimitsData.emailsPerMonth}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-500">Max Reminders per Invoice</div>
+                  <div className="text-lg font-semibold text-gray-900">{planLimitsData.maxReminders}</div>
+                </div>
+                <div className="md:col-span-2">
+                  <div className="text-sm text-gray-500">Auto-Stop Window</div>
+                  <div className="text-lg font-semibold text-gray-900">After {planLimitsData.autoStopDays} days overdue</div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Usage This Month (Placeholder) */}
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Usage This Month</h3>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Auto emails sent:</span>
+                  <span className="font-medium text-gray-900">— / {planLimitsData.emailsPerMonth}</span>
+                </div>
+                {/* TODO: Wire usage from server counters */}
+                <p className="text-xs text-gray-500 mt-2">Usage tracking will be available soon</p>
+              </div>
+            </div>
           </div>
 
           {/* Plan Comparison */}
@@ -225,4 +345,4 @@ export default function BillingPage() {
       </div>
       </AppLayout>
     );
-  }
+}

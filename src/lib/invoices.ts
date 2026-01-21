@@ -56,8 +56,8 @@ function convertSnapshotToInvoices(snapshot: QuerySnapshot<DocumentData>, user: 
       customerEmail: data.customerEmail || "",
       amount: data.amount || data.amountCents || 0,
       status: data.status || "pending",
-      dueAt: data.dueAt,
-      createdAt: data.createdAt || new Date().toISOString(),
+      dueAt: data.dueAt || data.dueAt?.toDate?.() || new Date().toISOString(),
+      createdAt: data.createdAt || data.createdAt?.toDate?.() || new Date().toISOString(),
       userId: data.userId || user.uid,
       notes: data.notes,
       paymentLink: data.paymentLink,
@@ -67,23 +67,15 @@ function convertSnapshotToInvoices(snapshot: QuerySnapshot<DocumentData>, user: 
       chaseCount: data.chaseCount || 0,
       lastChasedAt: data.lastChasedAt?.toDate?.() || data.lastChasedAt,
       nextChaseAt: data.nextChaseAt?.toDate?.() || data.nextChaseAt,
-      updatedAt: data.updatedAt,
+      updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
     };
 
     // Convert Timestamp to ISO string if needed
     if (invoice.dueAt instanceof Timestamp) {
       invoice.dueAt = invoice.dueAt.toDate().toISOString();
-    } else if (!invoice.dueAt) {
-      invoice.dueAt = new Date().toISOString();
     }
     if (invoice.createdAt instanceof Timestamp) {
       invoice.createdAt = invoice.createdAt.toDate().toISOString();
-    } else if (!invoice.createdAt || typeof invoice.createdAt !== "string") {
-      // Ensure createdAt is always a string, use current time as fallback
-      invoice.createdAt = new Date().toISOString();
-      if (process.env.NODE_ENV !== "production") {
-        console.warn(`[Dev] Invoice ${doc.id} had invalid createdAt, using fallback`);
-      }
     }
     if (invoice.lastChasedAt instanceof Timestamp) {
       invoice.lastChasedAt = invoice.lastChasedAt.toDate().toISOString();
@@ -93,8 +85,6 @@ function convertSnapshotToInvoices(snapshot: QuerySnapshot<DocumentData>, user: 
     }
     if (invoice.updatedAt instanceof Timestamp) {
       invoice.updatedAt = invoice.updatedAt.toDate().toISOString();
-    } else if (!invoice.updatedAt) {
-      invoice.updatedAt = new Date().toISOString();
     }
 
     invoices.push(invoice);
@@ -408,8 +398,8 @@ function convertDocToInvoice(docData: DocumentData, docId: string, useServerTime
     customerEmail: data.customerEmail || "",
     amount: data.amount || data.amountCents || 0,
     status: data.status || "pending",
-    dueAt: data.dueAt,
-    createdAt: data.createdAt,
+    dueAt: data.dueAt || new Date().toISOString(),
+    createdAt: data.createdAt || new Date().toISOString(),
     userId: data.userId,
     notes: data.notes,
     paymentLink: data.paymentLink,
@@ -425,17 +415,9 @@ function convertDocToInvoice(docData: DocumentData, docId: string, useServerTime
   // Convert Timestamp to ISO string if needed
   if (invoice.dueAt instanceof Timestamp) {
     invoice.dueAt = invoice.dueAt.toDate().toISOString();
-  } else if (!invoice.dueAt) {
-    invoice.dueAt = new Date().toISOString();
   }
   if (invoice.createdAt instanceof Timestamp) {
     invoice.createdAt = invoice.createdAt.toDate().toISOString();
-  } else if (!invoice.createdAt || typeof invoice.createdAt !== "string") {
-    // Ensure createdAt is always a string, use current time as fallback
-    invoice.createdAt = new Date().toISOString();
-    if (process.env.NODE_ENV !== "production") {
-      console.warn(`[Dev] Invoice ${docId} had invalid createdAt, using fallback`);
-    }
   }
   if (invoice.lastChasedAt instanceof Timestamp) {
     invoice.lastChasedAt = invoice.lastChasedAt.toDate().toISOString();
@@ -445,8 +427,6 @@ function convertDocToInvoice(docData: DocumentData, docId: string, useServerTime
   }
   if (invoice.updatedAt instanceof Timestamp) {
     invoice.updatedAt = invoice.updatedAt.toDate().toISOString();
-  } else if (!invoice.updatedAt) {
-    invoice.updatedAt = new Date().toISOString();
   }
 
   return invoice;
@@ -471,12 +451,25 @@ export function subscribeToInvoice(
           callback(null, "Invoice not found");
           return;
         }
+        // Use serverTimestamp estimate for pending timestamps
         const invoice = convertDocToInvoice(snapshot, snapshot.id, true);
         callback(invoice);
       },
       (error: any) => {
         console.error("Error subscribing to invoice:", error);
-        callback(null, error.message || "Failed to load invoice");
+        
+        // Dev-only logging for permission errors
+        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+        if (devToolsEnabled && (error.code === "permission-denied" || error.message?.includes("permission"))) {
+          console.log(`[Invoice Detail] Permission denied for invoiceId: ${invoiceId}, error code: ${error.code}`);
+        }
+        
+        // Check for permission denied error
+        if (error.code === "permission-denied" || error.message?.includes("permission") || error.message?.includes("insufficient")) {
+          callback(null, "Permission denied: You don't have access to this invoice (or it no longer exists).");
+        } else {
+          callback(null, error.message || "Failed to load invoice");
+        }
       }
     );
 

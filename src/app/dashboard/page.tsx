@@ -18,6 +18,7 @@ import { DashboardSkeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { formatCurrency } from "@/lib/utils";
 import { useEntitlements } from "@/hooks/useEntitlements";
+import { getBusinessProfile } from "@/lib/businessProfile";
 import { User } from "firebase/auth";
 
 export default function DashboardPage() {
@@ -28,6 +29,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [allInvoices, setAllInvoices] = useState<FirestoreInvoice[]>([]);
+  const [checkingProfile, setCheckingProfile] = useState(true);
   const pageMountTime = useRef<number>(Date.now());
   const firstRenderTime = useRef<number | null>(null);
   const invoiceUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -41,12 +43,27 @@ export default function DashboardPage() {
 
     pageMountTime.current = Date.now();
 
-    const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const authUnsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
         router.push("/login");
         return;
       }
       setUser(currentUser);
+      
+      // Onboarding gate: Check if business profile exists
+      // Only enforce on dashboard entry, not globally
+      try {
+        const profile = await getBusinessProfile(currentUser.uid);
+        if (!profile) {
+          // Redirect to onboarding if profile is missing
+          router.replace("/onboarding/company");
+          return;
+        }
+      } catch (profileError) {
+        console.error("Failed to check business profile on dashboard:", profileError);
+        // Continue to dashboard even if profile check fails
+      }
+      setCheckingProfile(false);
       
       // Clean up previous subscription if any
       if (invoiceUnsubscribeRef.current) {
@@ -164,7 +181,7 @@ export default function DashboardPage() {
     }
   }, [showToast]);
 
-  if (loading) {
+  if (loading || checkingProfile) {
     return (
       <AppLayout>
         <Header title="Dashboard" />
@@ -223,17 +240,7 @@ export default function DashboardPage() {
 
   return (
     <AppLayout>
-      <Header title="Dashboard">
-        <Button 
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            router.push("/invoices/new");
-          }}
-        >
-          New Invoice
-        </Button>
-      </Header>
+      <Header title="Dashboard" />
       <div className="flex-1 overflow-auto p-6">
         <div className="space-y-6">
           {/* Upgrade Banner */}

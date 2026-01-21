@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { createInvoicesBulk } from "@/lib/invoices";
@@ -39,7 +39,6 @@ interface ParsedInvoice {
 
 export default function ImportInvoicesPage() {
   const router = useRouter();
-  const pathname = usePathname();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
@@ -286,21 +285,6 @@ export default function ImportInvoicesPage() {
       if (result.success > 0) {
         // Navigate to dashboard after a short delay
         setTimeout(() => {
-          // PATHNAME GUARD: Only redirect to dashboard if we're still on the import page
-          if (pathname !== "/invoices/import") {
-            const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-            if (devToolsEnabled) {
-              console.warn(`[Import] BLOCKED redirect to /dashboard - pathname is ${pathname}, not /invoices/import`);
-              console.trace("Redirect blocked");
-            }
-            return;
-          }
-
-          const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-          if (devToolsEnabled) {
-            console.log(`[Import] Redirecting to /dashboard from pathname: ${pathname}`);
-            console.trace("Import -> Dashboard redirect");
-          }
           router.push("/dashboard");
         }, 2000);
       }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { createInvoice } from "@/lib/invoices";
@@ -21,16 +21,7 @@ import { User } from "firebase/auth";
 
 export default function NewInvoicePage() {
   const router = useRouter();
-  const pathname = usePathname();
   const { isPro } = useEntitlements();
-  
-  // Dev logging: Track page mount
-  useEffect(() => {
-    const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-    if (devToolsEnabled) {
-      console.log(`[NewInvoice] Page mounted, pathname: ${pathname}`);
-    }
-  }, [pathname]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState<string>("");
@@ -64,26 +55,14 @@ export default function NewInvoicePage() {
 
   useEffect(() => {
     if (!auth) {
-      const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-      if (devToolsEnabled) {
-        console.log(`[NewInvoice] No auth, redirecting to /login from: ${typeof window !== "undefined" ? window.location.pathname : "server"}`);
-      }
       router.push("/login");
       return;
     }
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) {
-        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-        if (devToolsEnabled) {
-          console.log(`[NewInvoice] No user, redirecting to /login from: ${typeof window !== "undefined" ? window.location.pathname : "server"}`);
-        }
         router.push("/login");
         return;
-      }
-      const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-      if (devToolsEnabled) {
-        console.log(`[NewInvoice] Auth state changed, user: ${currentUser.email}, pathname: ${typeof window !== "undefined" ? window.location.pathname : "server"}`);
       }
       setUser(currentUser);
     });
@@ -163,7 +142,7 @@ export default function NewInvoicePage() {
 
       // Store invoice ID and reset form for "Add another" flow
       setCreatedInvoiceId(invoiceId);
-      setSuccessMessage("Invoice created");
+      setSuccessMessage("Invoice created successfully!");
       
       // Reset form to allow adding another invoice
       setFormData({
@@ -364,6 +343,8 @@ export default function NewInvoicePage() {
                       onClick={() => {
                         setSuccessMessage("");
                         setCreatedInvoiceId(null);
+                        router.replace("/invoices/new");
+                        router.refresh();
                       }}
                     >
                       Add Another
