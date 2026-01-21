@@ -79,6 +79,11 @@ export default function CompanyOnboardingPage() {
       });
 
       // Redirect to dashboard after successful save
+      const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+      if (devToolsEnabled) {
+        console.log("[redirect->dashboard]", { pathname: window.location.pathname, reason: "Post-onboarding save" });
+        console.trace("redirect->dashboard trace");
+      }
       router.push("/dashboard");
     } catch (error: any) {
       console.error("Failed to save company profile:", error);

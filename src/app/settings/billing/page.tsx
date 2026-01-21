@@ -191,122 +191,22 @@ export default function BillingPage() {
             </div>
           </div>
 
-          {/* Plan Comparison */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Free Plan */}
-            <div className={`bg-white rounded-lg border-2 p-6 ${!isPro ? "border-blue-500" : "border-gray-200"}`}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-semibold text-gray-900">Free</h3>
-                {!isPro && (
-                  <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-                    Current Plan
-                  </span>
-                )}
-              </div>
-              <div className="text-3xl font-bold text-gray-900 mb-2">$0</div>
-              <div className="text-sm text-gray-500 mb-6">per month</div>
-              
-              <ul className="space-y-3 mb-6">
-                <li className="flex items-start">
-                  <svg className="w-5 h-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-sm text-gray-600">Unlimited invoices</span>
-                </li>
-                <li className="flex items-start">
-                  <svg className="w-5 h-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-sm text-gray-600">CSV import</span>
-                </li>
-                <li className="flex items-start">
-                  <svg className="w-5 h-5 text-gray-300 mr-2 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-sm text-gray-400">Auto-chase emails</span>
-                </li>
-                <li className="flex items-start">
-                  <svg className="w-5 h-5 text-gray-300 mr-2 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-sm text-gray-400">Priority support</span>
-                </li>
-              </ul>
-
-              {!isPro && (
-                <div className="space-y-2">
-                  <Button onClick={() => router.push("/trial")} className="w-full">
-                    Start free trial
-                  </Button>
-                  <Button onClick={() => router.push("/pricing")} variant="secondary" className="w-full">
-                    View pricing
-                  </Button>
-                </div>
-              )}
-              {isPro && (
-                <Button variant="secondary" disabled className="w-full">
-                  Current Plan
+          {/* Upgrade/Manage Actions */}
+          {currentPlan === "free" && (
+            <div className="bg-white rounded-lg border border-gray-200 p-6 text-center">
+              <p className="text-gray-600 mb-4">
+                Ready to unlock auto-chase emails and more?
+              </p>
+              <div className="flex gap-4 justify-center">
+                <Button onClick={() => router.push("/trial")}>
+                  Start Free Trial
                 </Button>
-              )}
-            </div>
-
-            {/* Pro Plan */}
-            <div className={`bg-white rounded-lg border-2 p-6 ${isPro ? "border-blue-500" : "border-gray-200"}`}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-semibold text-gray-900">Pro</h3>
-                {isPro && (
-                  <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                    Current Plan
-                  </span>
-                )}
-              </div>
-              <div className="text-3xl font-bold text-gray-900 mb-2">$29</div>
-              <div className="text-sm text-gray-500 mb-6">per month</div>
-              
-              <ul className="space-y-3 mb-6">
-                <li className="flex items-start">
-                  <svg className="w-5 h-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-sm text-gray-600">Everything in Free</span>
-                </li>
-                <li className="flex items-start">
-                  <svg className="w-5 h-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-sm text-gray-600">Auto-chase emails</span>
-                </li>
-                <li className="flex items-start">
-                  <svg className="w-5 h-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-sm text-gray-600">Custom chase cadence</span>
-                </li>
-                <li className="flex items-start">
-                  <svg className="w-5 h-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  <span className="text-sm text-gray-600">Priority support</span>
-                </li>
-              </ul>
-
-              {!isPro && (
-                <div className="space-y-2">
-                  <Button onClick={() => router.push("/trial")} className="w-full">
-                    Start free trial
-                  </Button>
-                  <Button onClick={() => router.push("/pricing")} variant="secondary" className="w-full">
-                    View pricing
-                  </Button>
-                </div>
-              )}
-              {isPro && (
-                <Button variant="secondary" onClick={handleDowngrade} className="w-full">
-                  Downgrade to Free
+                <Button onClick={() => router.push("/pricing")} variant="secondary">
+                  View Pricing
                 </Button>
-              )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Dev Toggle */}
           {isDev && (
@@ -331,16 +231,6 @@ export default function BillingPage() {
               </div>
             </div>
           )}
-
-          {/* Link to full pricing page */}
-          <div className="bg-white rounded-lg border border-gray-200 p-6 text-center">
-            <p className="text-gray-600 mb-4">
-              Want to see all plan options and features?
-            </p>
-            <Link href="/pricing">
-              <Button variant="secondary">View full pricing page</Button>
-            </Link>
-          </div>
         </div>
       </div>
       </AppLayout>

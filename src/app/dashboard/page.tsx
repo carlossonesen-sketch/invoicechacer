@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { subscribeToUserInvoices, fetchNextPageOfInvoices, FirestoreInvoice, InvoiceSubscriptionResult, markInvoicePaid } from "@/lib/invoices";
@@ -23,6 +23,7 @@ import { User } from "firebase/auth";
 
 export default function DashboardPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const { isPro } = useEntitlements();
   const [user, setUser] = useState<User | null>(null);
   const [result, setResult] = useState<InvoiceSubscriptionResult>({ invoices: [] });
@@ -56,8 +57,15 @@ export default function DashboardPage() {
         const profile = await getBusinessProfile(currentUser.uid);
         if (!profile) {
           // Redirect to onboarding if profile is missing
-          router.replace("/onboarding/company");
-          return;
+          // Only redirect if we're on the dashboard page
+          const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+          if (pathname === "/dashboard") {
+            if (devToolsEnabled) {
+              console.log("[redirect->dashboard]", { pathname, reason: "Onboarding gate: no profile, redirecting to onboarding" });
+            }
+            router.replace("/onboarding/company");
+            return;
+          }
         }
       } catch (profileError) {
         console.error("Failed to check business profile on dashboard:", profileError);

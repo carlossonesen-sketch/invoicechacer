@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, FormEvent, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { getBusinessProfile } from "@/lib/businessProfile";
 
 export default function LoginPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -81,21 +82,36 @@ export default function LoginPage() {
       }
 
       // Check if user has completed company profile onboarding
-      try {
-        const profile = await getBusinessProfile(userCredential.user.uid);
-        if (!profile) {
-          // Redirect to onboarding if profile is missing
-          router.replace("/onboarding/company");
-        } else {
-          // Redirect to dashboard if profile exists
+      // ONLY redirect if we're on the login page
+      if (pathname === "/login") {
+        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+        try {
+          const profile = await getBusinessProfile(userCredential.user.uid);
+          if (!profile) {
+            // Redirect to onboarding if profile is missing
+            if (devToolsEnabled) {
+              console.log("[redirect->dashboard]", { pathname, reason: "No profile, redirecting to onboarding instead" });
+            }
+            router.replace("/onboarding/company");
+          } else {
+            // Redirect to dashboard if profile exists
+            if (devToolsEnabled) {
+              console.log("[redirect->dashboard]", { pathname, reason: "Post-login redirect, profile exists" });
+              console.trace("redirect->dashboard trace");
+            }
+            router.replace("/dashboard");
+          }
+        } catch (profileError) {
+          // If profile check fails, still redirect to dashboard
+          console.error("Failed to check business profile:", profileError);
+          if (devToolsEnabled) {
+            console.log("[redirect->dashboard]", { pathname, reason: "Profile check failed, defaulting to dashboard" });
+            console.trace("redirect->dashboard trace");
+          }
           router.replace("/dashboard");
         }
-      } catch (profileError) {
-        // If profile check fails, still redirect to dashboard
-        console.error("Failed to check business profile:", profileError);
-        router.replace("/dashboard");
+        router.refresh();
       }
-      router.refresh();
     } catch (err: any) {
       console.error("Auth error:", err);
       if (err.code === "auth/user-not-found") {
