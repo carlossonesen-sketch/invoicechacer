@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { subscribeToUserInvoices, fetchNextPageOfInvoices, markInvoicePaid, FirestoreInvoice, InvoiceSubscriptionResult } from "@/lib/invoices";
 import { QueryDocumentSnapshot } from "firebase/firestore";
 import { Header } from "@/components/layout/header";
@@ -19,6 +19,7 @@ import { User } from "firebase/auth";
 
 export default function InvoicesPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -28,24 +29,34 @@ export default function InvoicesPage() {
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | undefined>(undefined);
   const [hasMore, setHasMore] = useState(false);
   const invoiceUnsubscribeRef = useRef<(() => void) | null>(null);
+  const didRedirectRef = useRef<boolean>(false);
   const { showToast, ToastComponent } = useToast();
 
   useEffect(() => {
-    if (!auth) {
-      router.push("/login");
+    // Check Firebase availability first
+    if (firebaseUnavailable || !auth) {
+      setLoading(false);
       return;
     }
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) {
-        router.push("/login");
+        // Only redirect once
+        if (!didRedirectRef.current) {
+          didRedirectRef.current = true;
+          const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+          if (devToolsEnabled) {
+            console.log("[NAV DEBUG] router.push('/login')", { currentPathname: pathname, targetPathname: "/login", condition: "No authenticated user (invoices page)" });
+          }
+          router.push("/login");
+        }
         return;
       }
       setUser(currentUser);
     });
 
     return () => unsubscribe();
-  }, [router]);
+  }, [router, pathname]);
 
   useEffect(() => {
     if (!user) return;
@@ -146,14 +157,22 @@ export default function InvoicesPage() {
   const handleNewInvoice = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+    if (devToolsEnabled) {
+      console.log("[NAV DEBUG] router.push('/invoices/new')", { currentPathname: pathname, targetPathname: "/invoices/new", condition: "New Invoice button click" });
+    }
     router.push("/invoices/new");
-  }, [router]);
+  }, [router, pathname]);
 
   const handleImport = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+    if (devToolsEnabled) {
+      console.log("[NAV DEBUG] router.push('/invoices/import')", { currentPathname: pathname, targetPathname: "/invoices/import", condition: "Import CSV button click" });
+    }
     router.push("/invoices/import");
-  }, [router]);
+  }, [router, pathname]);
 
   return (
     <AppLayout>

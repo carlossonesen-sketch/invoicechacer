@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useRouter, useParams, useSearchParams } from "next/navigation";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useRouter, useParams, useSearchParams, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, markInvoicePaid, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
 import { dateInputToTimestamp, timestampToDateInput, formatDateOnly } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
@@ -23,6 +23,7 @@ import { useToast } from "@/components/ui/toast";
 
 export default function InvoiceDetailPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const params = useParams();
   const searchParams = useSearchParams();
   const invoiceId = params.id as string;
@@ -32,9 +33,11 @@ export default function InvoiceDetailPage() {
 
   const [invoice, setInvoice] = useState<FirestoreInvoice | null>(null);
   const [chaseEvents, setChaseEvents] = useState<ChaseEvent[]>([]);
+  const [chaseEventsError, setChaseEventsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
   const [isEditing, setIsEditing] = useState(shouldStartEditing);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState<string>("");
@@ -42,6 +45,7 @@ export default function InvoiceDetailPage() {
   const { isPro } = useEntitlements();
   const [user, setUser] = useState<any>(null);
   const [isDev, setIsDev] = useState(false);
+  const didRedirectRef = useRef<boolean>(false);
   const { showToast, ToastComponent } = useToast();
 
   const [formData, setFormData] = useState<{
@@ -65,8 +69,9 @@ export default function InvoiceDetailPage() {
   });
 
   useEffect(() => {
-    if (!auth) {
-      router.push("/login");
+    // Check Firebase availability first
+    if (firebaseUnavailable || !auth) {
+      setLoading(false);
       return;
     }
 
@@ -76,7 +81,15 @@ export default function InvoiceDetailPage() {
 
     const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) {
-        router.push("/login");
+        // Only redirect once
+        if (!didRedirectRef.current) {
+          didRedirectRef.current = true;
+          const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+          if (devToolsEnabled) {
+            console.log("[NAV DEBUG] router.push('/login')", { currentPathname: pathname, targetPathname: "/login", condition: "No authenticated user (invoice detail page)" });
+          }
+          router.push("/login");
+        }
         return;
       }
       setUser(currentUser);
@@ -134,8 +147,16 @@ export default function InvoiceDetailPage() {
             chaseEventsUnsubscribe = subscribeToChaseEvents(invoiceId, (events, error) => {
               if (error) {
                 console.error("Chase events subscription error:", error);
+                // Show non-fatal error message for permission issues
+                if (error.includes("permission") || error.includes("Permission")) {
+                  setChaseEventsError("Unable to load email history. You may not have permission to view this data.");
+                } else {
+                  setChaseEventsError(null); // Clear error for other types
+                }
+                setChaseEvents([]);
                 return;
               }
+              setChaseEventsError(null); // Clear error on success
               setChaseEvents(events);
             });
           }
@@ -279,6 +300,62 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  async function handleSendInvoice() {
+    if (!invoice) return;
+
+    if (!invoice.customerEmail) {
+      showToast("Please add a customer email address first", "error");
+      return;
+    }
+
+    setSendingEmail(true);
+    setSuccessMessage("");
+    setErrors({});
+
+    try {
+      const response = await fetch("/api/invoices/send-initial-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ invoiceId: invoice.id }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (data.alreadySent) {
+          showToast("Initial invoice email was already sent", "info");
+        } else {
+          throw new Error(data.error || "Failed to send email");
+        }
+      } else {
+        showToast("Invoice email sent successfully!", "success");
+        setSuccessMessage("Invoice email sent");
+        setTimeout(() => setSuccessMessage(""), 3000);
+      }
+    } catch (error: any) {
+      console.error("Failed to send invoice email:", error);
+      showToast(error.message || "Failed to send email. Please try again.", "error");
+      setErrors({ submit: error.message || "Failed to send email. Please try again." });
+    } finally {
+      setSendingEmail(false);
+    }
+  }
+
+  // Memoize due date conversion to avoid recalculation
+  // MUST be called before any conditional returns to maintain hooks order
+  const dueDateForDisplay = useMemo(() => {
+    if (!invoice?.dueAt) return new Date();
+    if (typeof invoice.dueAt === "string") {
+      return new Date(invoice.dueAt);
+    }
+    if (invoice.dueAt?.toDate) {
+      return invoice.dueAt.toDate();
+    }
+    return new Date();
+  }, [invoice?.dueAt]);
+
   if (loading) {
     return (
       <AppLayout>
@@ -303,7 +380,17 @@ export default function InvoiceDetailPage() {
             <p className="text-red-800 mb-4">
               {error || "You don't have access to this invoice (or it no longer exists)."}
             </p>
-            <Button onClick={() => router.push("/invoices")} variant="secondary">
+            <Button onClick={() => {
+              const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+              if (pathname !== "/invoices") {
+                if (devToolsEnabled) {
+                  console.log("[NAV DEBUG] router.push('/invoices')", { currentPathname: pathname, targetPathname: "/invoices", condition: "Back to Invoices button click" });
+                }
+                router.push("/invoices");
+              } else if (devToolsEnabled) {
+                console.log("[NAV DEBUG] Skipped router.push('/invoices') - already on /invoices", { currentPathname: pathname });
+              }
+            }} variant="secondary">
               Back to Invoices
             </Button>
           </div>
@@ -326,18 +413,6 @@ export default function InvoiceDetailPage() {
       </AppLayout>
     );
   }
-
-  // Memoize due date conversion to avoid recalculation
-  const dueDateForDisplay = useMemo(() => {
-    if (!invoice?.dueAt) return new Date();
-    if (typeof invoice.dueAt === "string") {
-      return new Date(invoice.dueAt);
-    }
-    if (invoice.dueAt?.toDate) {
-      return invoice.dueAt.toDate();
-    }
-    return new Date();
-  }, [invoice?.dueAt]);
 
   return (
     <AppLayout>
@@ -382,13 +457,22 @@ export default function InvoiceDetailPage() {
               </div>
               <div className="flex gap-2 ml-4">
                 {!isEditing && invoice.status !== "paid" && (
-                  <Button 
-                    onClick={handleMarkPaid}
-                    disabled={saving}
-                    className="bg-green-600 hover:bg-green-700 text-white"
-                  >
-                    {saving ? "Saving..." : "Mark Paid"}
-                  </Button>
+                  <>
+                    <Button 
+                      onClick={handleSendInvoice}
+                      disabled={sendingEmail || !invoice.customerEmail}
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      {sendingEmail ? "Sending..." : "Send Invoice"}
+                    </Button>
+                    <Button 
+                      onClick={handleMarkPaid}
+                      disabled={saving}
+                      className="bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      {saving ? "Saving..." : "Mark Paid"}
+                    </Button>
+                  </>
                 )}
                 {!isEditing && (
                   <Button variant="secondary" onClick={() => setIsEditing(true)}>
@@ -743,7 +827,13 @@ export default function InvoiceDetailPage() {
               <h3 className="text-lg font-semibold text-gray-900">Chase History</h3>
             </div>
             <div className="overflow-x-auto">
-              {chaseEvents.length === 0 ? (
+              {chaseEventsError ? (
+                <div className="px-6 py-4">
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
+                    <p className="text-sm text-yellow-800">{chaseEventsError}</p>
+                  </div>
+                </div>
+              ) : chaseEvents.length === 0 ? (
                 <div className="px-6 py-4 text-center text-gray-500">
                   No chase events yet
                 </div>

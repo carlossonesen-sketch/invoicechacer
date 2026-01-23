@@ -16,6 +16,7 @@ import { getEmailConfig } from "./emailConfig";
 import { assertEmailSendingAllowed, assertAutoChaseAllowed, applyTestRedirect } from "./emailGuards";
 import { assertEmailLimits } from "./emailLimits";
 import { Timestamp } from "firebase-admin/firestore";
+import { isApiError } from "@/lib/api/ApiError";
 
 export interface SendEmailParams {
   userId: string;
@@ -106,8 +107,13 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
   assertEmailSendingAllowed();
   assertAutoChaseAllowed();
 
-  // Step 2: Enforce rate limits
-  await assertEmailLimits({ userId, invoiceId });
+  // Step 2: Enforce rate limits (plan-aware, includes per-invoice type caps for trial)
+  await assertEmailLimits({ 
+    userId, 
+    invoiceId,
+    emailType: type as "invoice_initial" | "invoice_reminder" | "invoice_due" | "invoice_late_weekly" | undefined,
+    weekNumber: metadata?.weekNumber,
+  });
 
   // Step 3: Apply domain allowlist redirect
   const { finalEmail, redirected } = applyTestRedirect(to);
@@ -178,6 +184,10 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
       to: finalEmail,
       error: error instanceof Error ? error.message : "Unknown error",
     });
+    // Re-throw ApiError untouched so routes can use its status code
+    if (isApiError(error)) {
+      throw error;
+    }
     throw error;
   }
 }

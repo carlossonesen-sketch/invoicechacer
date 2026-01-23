@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { createInvoicesBulk } from "@/lib/invoices";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";

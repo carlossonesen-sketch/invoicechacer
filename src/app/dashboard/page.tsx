@@ -31,22 +31,40 @@ export default function DashboardPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [allInvoices, setAllInvoices] = useState<FirestoreInvoice[]>([]);
   const [checkingProfile, setCheckingProfile] = useState(true);
+  const [authResolved, setAuthResolved] = useState(false);
+  const [profileResolved, setProfileResolved] = useState(false);
   const pageMountTime = useRef<number>(Date.now());
   const firstRenderTime = useRef<number | null>(null);
   const invoiceUnsubscribeRef = useRef<(() => void) | null>(null);
+  const didRedirectRef = useRef<boolean>(false);
   const { showToast, ToastComponent } = useToast();
 
   useEffect(() => {
-    if (!auth) {
-      router.push("/login");
+    // Check Firebase availability first
+    if (typeof window !== "undefined" && !auth) {
+      // Firebase unavailable - don't redirect, let EnvMissing component show
+      setLoading(false);
+      setCheckingProfile(false);
+      setAuthResolved(true);
+      setProfileResolved(true);
       return;
     }
 
     pageMountTime.current = Date.now();
 
-    const authUnsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    const authUnsubscribe = onAuthStateChanged(auth!, async (currentUser) => {
+      setAuthResolved(true);
+      
       if (!currentUser) {
-        router.push("/login");
+        // Only redirect after bootstrap is complete
+        if (!didRedirectRef.current) {
+          didRedirectRef.current = true;
+          const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+          if (devToolsEnabled) {
+            console.log("[NAV DEBUG] router.push('/login')", { currentPathname: pathname, targetPathname: "/login", condition: "No authenticated user" });
+          }
+          router.push("/login");
+        }
         return;
       }
       setUser(currentUser);
@@ -55,13 +73,16 @@ export default function DashboardPage() {
       // Only enforce on dashboard entry, not globally
       try {
         const profile = await getBusinessProfile(currentUser.uid);
+        setProfileResolved(true);
+        
         if (!profile) {
           // Redirect to onboarding if profile is missing
-          // Only redirect if we're on the dashboard page
-          const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-          if (pathname === "/dashboard") {
+          // Only redirect if we're on the dashboard page AND haven't redirected yet
+          if (pathname === "/dashboard" && !didRedirectRef.current) {
+            didRedirectRef.current = true;
+            const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
             if (devToolsEnabled) {
-              console.log("[redirect->dashboard]", { pathname, reason: "Onboarding gate: no profile, redirecting to onboarding" });
+              console.log("[NAV DEBUG] router.replace('/onboarding/company')", { currentPathname: pathname, targetPathname: "/onboarding/company", condition: "Onboarding gate: no profile" });
             }
             router.replace("/onboarding/company");
             return;
@@ -69,6 +90,7 @@ export default function DashboardPage() {
         }
       } catch (profileError) {
         console.error("Failed to check business profile on dashboard:", profileError);
+        setProfileResolved(true);
         // Continue to dashboard even if profile check fails
       }
       setCheckingProfile(false);

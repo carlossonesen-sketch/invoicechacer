@@ -117,6 +117,36 @@ For testing email functionality (invoice emails, reminders, etc.), see [docs/EMA
 - Configuring email environment variables
 - Testing email endpoints
 
+### Email Testing Endpoints
+
+Dev-only endpoints for production testing of invoice emails. All endpoints require `EMAIL_SENDING_ENABLED=true` (or `NEXT_PUBLIC_DEV_TOOLS=1` in dev mode).
+
+**PowerShell commands to test each endpoint:**
+
+```powershell
+# Send initial invoice email
+$body = @{ invoiceId = "YOUR_INVOICE_ID" } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:3000/api/invoices/send-initial-email" -Method POST -Body $body -ContentType "application/json"
+
+# Send reminder email (3 days before due date)
+$body = @{ invoiceId = "YOUR_INVOICE_ID" } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:3000/api/invoices/send-reminder-email" -Method POST -Body $body -ContentType "application/json"
+
+# Send due date email
+$body = @{ invoiceId = "YOUR_INVOICE_ID" } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:3000/api/invoices/send-due-email" -Method POST -Body $body -ContentType "application/json"
+
+# Send late email (weekly follow-up, weekNumber 1-8)
+$body = @{ invoiceId = "YOUR_INVOICE_ID"; weekNumber = 1 } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:3000/api/invoices/send-late-email" -Method POST -Body $body -ContentType "application/json"
+
+# Example: Send Week 3 late email
+$body = @{ invoiceId = "YOUR_INVOICE_ID"; weekNumber = 3 } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:3000/api/invoices/send-late-email" -Method POST -Body $body -ContentType "application/json"
+```
+
+**Note:** All endpoints are idempotent - they return `400` with `alreadySent: true` if the email has already been sent for that invoice/type/weekNumber combination.
+
 ### Firestore Index Setup
 
 The app requires composite indexes for invoice and email event queries. Index definitions are in `firestore.indexes.json`.

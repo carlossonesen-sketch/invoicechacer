@@ -592,8 +592,14 @@ export function subscribeToChaseEvents(
   }
 
   try {
-    const eventsRef = collection(db, "invoices", invoiceId, "chaseEvents");
-    const q = query(eventsRef, orderBy("createdAt", "desc"));
+    // Use emailEvents collection instead of subcollection to avoid permission issues
+    // emailEvents has invoiceId field, so we can query by that
+    const eventsRef = collection(db, "emailEvents");
+    const q = query(
+      eventsRef,
+      where("invoiceId", "==", invoiceId),
+      orderBy("createdAt", "desc")
+    );
 
     const unsubscribe = onSnapshot(
       q,
@@ -601,29 +607,45 @@ export function subscribeToChaseEvents(
         const events: ChaseEvent[] = [];
         snapshot.forEach((doc) => {
           const data = doc.data();
+          // Map emailEvents to ChaseEvent format for compatibility
           events.push({
             id: doc.id,
             invoiceId: invoiceId,
             createdAt: data.createdAt instanceof Timestamp
               ? data.createdAt.toDate().toISOString()
               : data.createdAt || new Date().toISOString(),
-            toEmail: data.toEmail || "",
-            type: data.type || "reminder",
+            toEmail: data.originalTo || data.to || "",
+            type: data.type === "invoice_initial" || data.type === "invoice_reminder" || data.type === "invoice_due" || data.type === "invoice_late_weekly"
+              ? "reminder"
+              : (data.type || "reminder"),
             dryRun: data.dryRun || false,
           });
         });
         callback(events);
       },
       (error: any) => {
-        console.error("Error subscribing to chase events:", error);
-        callback([], error.message || "Failed to load chase events");
+        // Handle permission errors gracefully
+        if (error?.code === "permission-denied" || error?.message?.includes("Missing or insufficient permissions")) {
+          console.warn("Permission denied for chase events - showing empty list:", error);
+          // Return empty array instead of error to prevent page crash
+          callback([]);
+        } else {
+          console.error("Error subscribing to chase events:", error);
+          callback([], error.message || "Failed to load chase events");
+        }
       }
     );
 
     return unsubscribe;
   } catch (error: any) {
     console.error("Error setting up chase events subscription:", error);
-    callback([], error.message || "Failed to set up chase events subscription");
+    // Handle permission errors gracefully
+    if (error?.code === "permission-denied" || error?.message?.includes("Missing or insufficient permissions")) {
+      console.warn("Permission denied for chase events - showing empty list");
+      callback([]);
+    } else {
+      callback([], error.message || "Failed to set up chase events subscription");
+    }
     return () => {};
   }
 }

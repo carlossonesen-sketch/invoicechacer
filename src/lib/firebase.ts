@@ -1,32 +1,41 @@
 import { initializeApp, getApps, FirebaseApp } from "firebase/app";
 import { getAuth, Auth } from "firebase/auth";
 import { getFirestore, Firestore } from "firebase/firestore";
+import { getPublicFirebaseEnv, assertPublicFirebaseEnv } from "./env";
 
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "",
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "",
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "",
-};
+// Validate environment variables before initializing
+const envValidation = typeof window !== "undefined" ? assertPublicFirebaseEnv() : { isValid: false, missingKeys: [] };
+const firebaseEnv = getPublicFirebaseEnv();
 
 // Initialize Firebase only if config is valid
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
+export const firebaseUnavailable = !envValidation.isValid;
 
-if (typeof window !== "undefined" && firebaseConfig.apiKey) {
-  // Only initialize on client side with valid config
-  if (getApps().length === 0) {
-    app = initializeApp(firebaseConfig);
+if (typeof window !== "undefined") {
+  if (envValidation.isValid) {
+    // Only initialize on client side with valid config
+    const firebaseConfig = {
+      apiKey: firebaseEnv.apiKey,
+      authDomain: firebaseEnv.authDomain,
+      projectId: firebaseEnv.projectId,
+      storageBucket: firebaseEnv.storageBucket,
+      messagingSenderId: firebaseEnv.messagingSenderId,
+      appId: firebaseEnv.appId,
+    };
+
+    if (getApps().length === 0) {
+      app = initializeApp(firebaseConfig);
+    } else {
+      app = getApps()[0];
+    }
+    auth = getAuth(app);
+    db = getFirestore(app);
   } else {
-    app = getApps()[0];
+    // Firebase unavailable - do not initialize
+    console.error("[Firebase] Missing required environment variables. Firebase features will be unavailable.");
   }
-  auth = getAuth(app);
-  db = getFirestore(app);
-} else if (typeof window !== "undefined") {
-  console.warn("Firebase config is missing. Please check your environment variables.");
 }
 
 // Export with fallback handling

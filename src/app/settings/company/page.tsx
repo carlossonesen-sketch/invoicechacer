@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { getBusinessProfile, upsertBusinessProfile } from "@/lib/businessProfile";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -26,16 +26,26 @@ export default function CompanySettingsPage() {
     companyEmail: "",
     phone: "",
   });
+  const didRedirectRef = useRef<boolean>(false);
 
   useEffect(() => {
-    if (!auth) {
-      router.push("/login");
+    // Check Firebase availability first
+    if (firebaseUnavailable || !auth) {
+      setLoading(false);
       return;
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
-        router.push("/login");
+        // Only redirect once
+        if (!didRedirectRef.current) {
+          didRedirectRef.current = true;
+          const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+          if (devToolsEnabled) {
+            console.log("[NAV DEBUG] router.push('/login')", { currentPathname: typeof window !== "undefined" ? window.location.pathname : "unknown", targetPathname: "/login", condition: "No authenticated user (company settings page)" });
+          }
+          router.push("/login");
+        }
         return;
       }
       setUser(currentUser);

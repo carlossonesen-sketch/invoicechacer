@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { createInvoice } from "@/lib/invoices";
 import { dateInputToTimestamp } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
@@ -21,6 +21,7 @@ import { User } from "firebase/auth";
 
 export default function NewInvoicePage() {
   const router = useRouter();
+  const pathname = usePathname();
   const { isPro } = useEntitlements();
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -28,6 +29,7 @@ export default function NewInvoicePage() {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
+  const didRedirectRef = useRef<boolean>(false);
 
   const [formData, setFormData] = useState<{
     customerName: string;
@@ -54,21 +56,29 @@ export default function NewInvoicePage() {
   });
 
   useEffect(() => {
-    if (!auth) {
-      router.push("/login");
+    // Check Firebase availability first
+    if (firebaseUnavailable || !auth) {
       return;
     }
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) {
-        router.push("/login");
+        // Only redirect once
+        if (!didRedirectRef.current) {
+          didRedirectRef.current = true;
+          const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+          if (devToolsEnabled) {
+            console.log("[NAV DEBUG] router.push('/login')", { currentPathname: pathname, targetPathname: "/login", condition: "No authenticated user (new invoice page)" });
+          }
+          router.push("/login");
+        }
         return;
       }
       setUser(currentUser);
     });
 
     return () => unsubscribe();
-  }, [router]);
+  }, [router, pathname]);
 
   function validate(): boolean {
     const newErrors: Record<string, string> = {};
@@ -341,10 +351,18 @@ export default function NewInvoicePage() {
                       variant="secondary"
                       size="sm"
                       onClick={() => {
-                        setSuccessMessage("");
-                        setCreatedInvoiceId(null);
-                        router.replace("/invoices/new");
-                        router.refresh();
+                        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+                        if (pathname !== "/invoices/new") {
+                          if (devToolsEnabled) {
+                            console.log("[NAV DEBUG] router.replace('/invoices/new')", { currentPathname: pathname, targetPathname: "/invoices/new", condition: "Add Another button click" });
+                          }
+                          router.replace("/invoices/new");
+                          router.refresh();
+                        } else {
+                          setSuccessMessage("");
+                          setCreatedInvoiceId(null);
+                          router.refresh();
+                        }
                       }}
                     >
                       Add Another

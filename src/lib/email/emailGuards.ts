@@ -3,6 +3,7 @@
  */
 
 import { getEmailConfig } from "./emailConfig";
+import { ApiError } from "@/lib/api/ApiError";
 
 /**
  * Extract domain from email address
@@ -71,12 +72,14 @@ export function assertEmailSendingAllowed(): void {
   const devToolsEnabled = process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
   
   if (!config.emailSendingEnabled && !devToolsEnabled) {
-    throw new Error(
+    throw new ApiError(
+      "EMAIL_SENDING_DISABLED",
       "EMAIL_SENDING_DISABLED. " +
       "Set EMAIL_SENDING_ENABLED=true in your .env.local file to enable email sending. " +
       (process.env.NODE_ENV !== "production" 
         ? "Alternatively, set NEXT_PUBLIC_DEV_TOOLS=1 to enable in development mode."
-        : "")
+        : ""),
+      403
     );
   }
 }
@@ -93,12 +96,14 @@ export function assertAutoChaseAllowed(): void {
   const devToolsEnabled = process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
   
   if (!config.autoChaseEnabled && !devToolsEnabled) {
-    throw new Error(
+    throw new ApiError(
+      "AUTOCHASE_DISABLED",
       "AUTOCHASE_DISABLED. " +
       "Set AUTOCHASE_ENABLED=true in your .env.local file to enable auto-chase. " +
       (process.env.NODE_ENV !== "production" 
         ? "Alternatively, set NEXT_PUBLIC_DEV_TOOLS=1 to enable in development mode."
-        : "")
+        : ""),
+      403
     );
   }
 }

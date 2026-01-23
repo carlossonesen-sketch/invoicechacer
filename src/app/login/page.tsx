@@ -3,7 +3,7 @@
 import { useState, FormEvent, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
@@ -20,8 +20,8 @@ export default function LoginPage() {
   const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
-    if (!auth) {
-      setError("Firebase not initialized. Please check your environment variables.");
+    if (firebaseUnavailable || !auth) {
+      setError("Firebase configuration is missing. Please check your environment variables.");
     }
   }, []);
 
@@ -29,8 +29,8 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
 
-    if (!auth) {
-      setError("Firebase not initialized. Please check your environment variables.");
+    if (firebaseUnavailable || !auth) {
+      setError("Firebase configuration is missing. Please check your environment variables.");
       return;
     }
 

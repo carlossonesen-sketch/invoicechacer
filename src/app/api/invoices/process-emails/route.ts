@@ -8,6 +8,8 @@ import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { computeNextInvoiceEmailToSend, InvoiceForSchedule } from "@/lib/email/scheduler/invoiceEmailSchedule";
 import { sendInvoiceEmail } from "@/lib/email/sendInvoiceEmail";
+import { mapErrorToHttp } from "@/lib/api/httpError";
+import { isApiError } from "@/lib/api/ApiError";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
@@ -129,14 +131,22 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[PROCESS EMAILS] Fatal error:", error);
-    const isDev = process.env.NODE_ENV !== "production";
-    return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Unknown error",
-        ...(isDev && error instanceof Error && error.stack ? { stack: error.stack } : {}),
-      },
-      { status: 500 }
-    );
+    
+    // Use ApiError status if present, otherwise fall back to mapErrorToHttp
+    if (isApiError(error)) {
+      const isDev = process.env.NODE_ENV !== "production";
+      return NextResponse.json(
+        {
+          error: error.code,
+          message: error.message,
+          ...(isDev && error.stack ? { stack: error.stack } : {}),
+        },
+        { status: error.status }
+      );
+    }
+    
+    const { status, body } = mapErrorToHttp(error);
+    return NextResponse.json(body, { status });
   }
 }
 

@@ -1,0 +1,14 @@
+# Required Environment Variables for Vercel Deployment
+# Copy these keys and paste into Vercel Project Settings > Environment Variables
+# Values should be obtained from Firebase Console
+
+# Public Firebase Configuration (client-side, safe to expose)
+NEXT_PUBLIC_FIREBASE_API_KEY
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+NEXT_PUBLIC_FIREBASE_PROJECT_ID
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+NEXT_PUBLIC_FIREBASE_APP_ID
+
+# Private Firebase Service Account (server-side, must not be exposed)
+FIREBASE_SERVICE_ACCOUNT_KEY
