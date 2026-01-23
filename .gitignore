@@ -47,3 +47,11 @@ ui-debug.log
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Firebase / Google Cloud service account secrets
+_service_account_env.txt
+*.service-account*.json
+serviceAccount*.json
+firebase-adminsdk*.json
+*.pem
+*.key
