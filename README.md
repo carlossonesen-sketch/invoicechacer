@@ -10,9 +10,32 @@ A web-first Invoice Chaser MVP built with Next.js (App Router), TypeScript, and 
 - npm, yarn, pnpm, or bun
 - Firebase project (shared with the Flutter app)
 
+### Local Setup
+
+1. **Copy environment template:**
+   ```bash
+   cp .env.example .env.local
+   ```
+
+2. **Fill in Firebase credentials:**
+   - Go to [Firebase Console](https://console.firebase.google.com/) → Project Settings → Your apps
+   - Copy the web app config values to `.env.local` (all `NEXT_PUBLIC_FIREBASE_*` variables)
+   - Go to Project Settings → Service Accounts → Generate New Private Key
+   - Copy the entire JSON and paste as a single line for `FIREBASE_SERVICE_ACCOUNT_KEY`
+
+3. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+4. **Start development server:**
+   ```bash
+   npm run dev
+   ```
+
 ### Environment Variables
 
-The `.env.local` file has been created with placeholder values. Follow the steps below to fill in your Firebase configuration.
+The `.env.local` file is gitignored and should never be committed. See the detailed setup steps below for obtaining Firebase credentials.
 
 #### Step 1: Get Firebase Web App Configuration
 
@@ -53,7 +76,19 @@ The `.env.local` file has been created with placeholder values. Follow the steps
 
 #### Step 3: Convert Service Account JSON to Environment Variable
 
-**Option A: Using the PowerShell script (Recommended for Windows)**
+**Option A: Using the Automated Setup Script (Recommended)**
+
+1. Open PowerShell in the project root directory
+2. Run the setup script (it will automatically update `.env.local`):
+   ```powershell
+   .\scripts\setup-admin-env.ps1 -Path "path\to\your\serviceAccountKey.json"
+   ```
+3. The script will:
+   - Create a backup of `.env.local` (if it exists) to `.env.local.bak`
+   - Add or update `FIREBASE_SERVICE_ACCOUNT_KEY` in `.env.local`
+   - Show a preview of the key (first 80 characters)
+
+**Option B: Using the Conversion Script (Manual)**
 
 1. Open PowerShell in the project root directory
 2. Run the helper script:
@@ -62,7 +97,7 @@ The `.env.local` file has been created with placeholder values. Follow the steps
    ```
 3. The script will output a single-line string. Copy it and paste it as the value for `FIREBASE_SERVICE_ACCOUNT_KEY` in `.env.local`
 
-**Option B: Manual conversion**
+**Option C: Manual conversion**
 
 1. Open the downloaded JSON file in a text editor
 2. Remove all newlines and extra spaces to make it a single line
@@ -75,14 +110,33 @@ The `.env.local` file has been created with placeholder values. Follow the steps
 
 **Important:** Never commit `.env.local` or the service account JSON file to version control. They contain sensitive credentials.
 
+## Email Testing Setup
+
+For testing email functionality (invoice emails, reminders, etc.), see [docs/EMAIL_TESTING.md](docs/EMAIL_TESTING.md) for detailed instructions on:
+- Setting up Firebase Admin credentials
+- Configuring email environment variables
+- Testing email endpoints
+
 ### Firestore Index Setup
 
-The app queries invoices by `userId` and `createdAt`. You may need to create a composite index:
+The app requires composite indexes for invoice and email event queries. Index definitions are in `firestore.indexes.json`.
 
-1. When you first query invoices, Firebase will show an error with a link to create the index
-2. Click the link or manually create an index in Firebase Console:
-   - Collection: `invoices`
-   - Fields: `userId` (Ascending), `createdAt` (Descending)
+**Deploy indexes:**
+```bash
+firebase deploy --only firestore:indexes
+```
+
+**Required indexes:**
+- `invoices` collection:
+  - `status` (ASC), `dueAt` (ASC), `__name__` (ASC) - for email processing queries
+- `emailEvents` collection:
+  - `userId` (ASC), `createdAt` (ASC), `__name__` (ASC) - for user email count queries
+  - `userId` (ASC), `createdAt` (DESC), `__name__` (DESC) - for user email count queries (descending)
+  - `invoiceId` (ASC), `createdAt` (DESC), `__name__` (DESC) - for invoice cooldown queries
+
+If you see a "query requires an index" error, you can:
+1. Click the link in the error message to create it in Firebase Console, OR
+2. Deploy the committed `firestore.indexes.json` file with the command above
 
 ### Installation
 
