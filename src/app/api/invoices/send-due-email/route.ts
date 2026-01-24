@@ -62,6 +62,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Hard guard: Only allow emails for pending invoices
+    if (data.status !== "pending") {
+      return NextResponse.json(
+        { error: "INVOICE_NOT_PENDING", message: `Invoice status is "${data.status}", not "pending". Cannot send emails for non-pending invoices.` },
+        { status: 403 }
+      );
+    }
+
     // Check if due email already sent (idempotency check)
     // Note: assertEmailLimits in sendEmailSafe will also check trial limits
     const emailEventsRef = db.collection("emailEvents");

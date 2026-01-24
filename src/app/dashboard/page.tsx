@@ -6,7 +6,7 @@ import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { subscribeToUserInvoices, fetchNextPageOfInvoices, FirestoreInvoice, InvoiceSubscriptionResult, markInvoicePaid } from "@/lib/invoices";
+import { subscribeToUserInvoices, fetchNextPageOfInvoices, markInvoicePaid, FirestoreInvoice, InvoiceSubscriptionResult } from "@/lib/invoices";
 import { QueryDocumentSnapshot } from "firebase/firestore";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -202,14 +202,36 @@ export default function DashboardPage() {
 
   const handleMarkPaid = useCallback(async (invoiceId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      await markInvoicePaid(invoiceId);
-      showToast("Marked paid");
-    } catch (error: any) {
-      console.error("Failed to mark invoice as paid:", error);
-      showToast(error.message || "Failed to mark as paid", "error");
-    }
-  }, [showToast]);
+    
+    // Store original status for potential revert
+    const originalInvoice = allInvoices.find((inv) => inv.id === invoiceId);
+    const originalStatus = originalInvoice?.status || "pending";
+    
+    // Optimistically update the invoice status
+    setAllInvoices((prev) =>
+      prev.map((inv) =>
+        inv.id === invoiceId ? { ...inv, status: "paid" as const } : inv
+      )
+    );
+    
+    await markInvoicePaid(
+      invoiceId,
+      () => {
+        // Success - invoices will update automatically via real-time subscription
+        // Optimistic update already applied above
+        showToast("Invoice marked as paid", "success");
+      },
+      (errorMessage) => {
+        // Revert optimistic update on error
+        setAllInvoices((prev) =>
+          prev.map((inv) =>
+            inv.id === invoiceId ? { ...inv, status: originalStatus as "pending" | "overdue" | "paid" } : inv
+          )
+        );
+        showToast(errorMessage, "error");
+      }
+    );
+  }, [showToast, allInvoices]);
 
   if (loading || checkingProfile) {
     return (

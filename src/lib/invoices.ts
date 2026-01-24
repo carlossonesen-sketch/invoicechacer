@@ -1,8 +1,8 @@
 "use client";
 
 import { collection, query, where, orderBy, limit, getDocs, onSnapshot, doc, onSnapshot as onDocSnapshot, updateDoc, Timestamp, serverTimestamp, addDoc, writeBatch, QuerySnapshot, DocumentData, QueryDocumentSnapshot, startAfter } from "firebase/firestore";
-import { db } from "./firebase";
-import { User } from "firebase/auth";
+import { db, auth } from "./firebase";
+import { User, onAuthStateChanged } from "firebase/auth";
 
 export interface FirestoreInvoice {
   id: string;
@@ -543,17 +543,135 @@ export async function updateInvoice(
 /**
  * Mark an invoice as paid
  */
-export async function markInvoicePaid(invoiceId: string): Promise<void> {
-  if (!db) {
-    throw new Error("Firebase not initialized. Please check your environment variables.");
+/**
+ * Wait for Firebase auth to be ready and get current user
+ * Returns null if auth is not available or user is not authenticated
+ */
+function waitForAuth(): Promise<User | null> {
+  return new Promise((resolve) => {
+    if (!auth) {
+      resolve(null);
+      return;
+    }
+
+    // If user is already available, return immediately
+    if (auth.currentUser) {
+      resolve(auth.currentUser);
+      return;
+    }
+
+    // Otherwise wait for auth state change
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      unsubscribe();
+      resolve(user);
+    });
+  });
+}
+
+/**
+ * Shared helper to mark an invoice as paid via API
+ * Shows confirmation prompt, gets Firebase ID token, and calls the API
+ * 
+ * @param invoiceId - The invoice ID to mark as paid
+ * @param onSuccess - Optional callback on success
+ * @param onError - Optional callback on error
+ * @returns Promise that resolves to true on success, false on cancellation/error
+ */
+export async function markInvoicePaid(
+  invoiceId: string,
+  onSuccess?: () => void,
+  onError?: (error: string) => void
+): Promise<boolean> {
+  // Show confirmation prompt
+  if (!window.confirm("Mark this invoice as paid? This stops all future reminders.")) {
+    return false;
   }
 
-  const invoiceRef = doc(db, "invoices", invoiceId);
+  try {
+    // Wait for auth if needed
+    const user = await waitForAuth();
+    
+    if (!user) {
+      const errorMsg = "You must be logged in to mark invoices as paid.";
+      console.error("[markInvoicePaid] No authenticated user found");
+      onError?.(errorMsg);
+      return false;
+    }
 
-  await updateDoc(invoiceRef, {
-    status: "paid",
-    updatedAt: serverTimestamp(),
-  });
+    // Get Firebase ID token
+    let idToken: string;
+    try {
+      idToken = await user.getIdToken();
+    } catch (tokenError) {
+      const errorMsg = "Authentication error. Please try logging in again.";
+      console.error("[markInvoicePaid] Failed to get ID token:", tokenError);
+      onError?.(errorMsg);
+      return false;
+    }
+
+    if (!idToken) {
+      const errorMsg = "Failed to get authentication token. Please try logging in again.";
+      console.error("[markInvoicePaid] ID token is missing");
+      onError?.(errorMsg);
+      return false;
+    }
+
+    // Call API with Authorization header
+    const response = await fetch(`/api/invoices/${invoiceId}/mark-paid`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${idToken}`,
+      },
+    });
+
+    // Parse response
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      // If JSON parse fails, check status
+      if (response.status === 401) {
+        const errorMsg = "Authentication failed. Please try logging in again.";
+        console.error("[markInvoicePaid] 401 Unauthorized - token may be invalid");
+        onError?.(errorMsg);
+        return false;
+      }
+      if (!response.ok) {
+        const errorMsg = "Failed to mark invoice as paid";
+        onError?.(errorMsg);
+        return false;
+      }
+      // Success but no JSON body
+      onSuccess?.();
+      return true;
+    }
+
+    if (!response.ok) {
+      // Handle 401 specifically
+      if (response.status === 401) {
+        const errorMsg = data.message || data.error || "Authentication failed. Please try logging in again.";
+        console.error("[markInvoicePaid] 401 Unauthorized:", errorMsg);
+        onError?.(errorMsg);
+        return false;
+      }
+      
+      // Other errors
+      const errorMessage = data.message || data.error || "Failed to mark invoice as paid";
+      onError?.(errorMessage);
+      return false;
+    }
+
+    // Success
+    onSuccess?.();
+    return true;
+  } catch (error) {
+    // Network or other error
+    const errorMessage = error instanceof Error ? error.message : "Failed to mark as paid. Please try again.";
+    console.error("[markInvoicePaid] Error:", error);
+    onError?.(errorMessage);
+    return false;
+  }
 }
 
 export async function triggerChaseNow(invoiceId: string): Promise<void> {

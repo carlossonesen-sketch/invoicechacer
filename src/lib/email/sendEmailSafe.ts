@@ -16,7 +16,7 @@ import { getEmailConfig } from "./emailConfig";
 import { assertEmailSendingAllowed, assertAutoChaseAllowed, applyTestRedirect } from "./emailGuards";
 import { assertEmailLimits } from "./emailLimits";
 import { Timestamp } from "firebase-admin/firestore";
-import { isApiError } from "@/lib/api/ApiError";
+import { ApiError, isApiError } from "@/lib/api/ApiError";
 
 export interface SendEmailParams {
   userId: string;
@@ -102,6 +102,24 @@ async function writeEmailEvent(event: EmailEvent): Promise<void> {
 export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
   const config = getEmailConfig();
   const { userId, invoiceId, to, subject, html, text, type, metadata } = params;
+
+  // Step 0: Hard guard - verify invoice status is "pending"
+  // This prevents emails from being sent to paid or overdue invoices
+  const db = getAdminFirestore();
+  if (db && invoiceId) {
+    const invoiceRef = db.collection("invoices").doc(invoiceId);
+    const invoiceDoc = await invoiceRef.get();
+    if (invoiceDoc.exists) {
+      const invoiceData = invoiceDoc.data();
+      if (invoiceData && invoiceData.status !== "pending") {
+        throw new ApiError(
+          "INVOICE_NOT_PENDING",
+          `Invoice status is "${invoiceData.status}", not "pending". Cannot send emails for non-pending invoices.`,
+          403
+        );
+      }
+    }
+  }
 
   // Step 1: Enforce kill switches
   assertEmailSendingAllowed();

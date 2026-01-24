@@ -76,6 +76,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Hard guard: Only allow emails for pending invoices
+    if (data.status !== "pending") {
+      return NextResponse.json(
+        { error: "INVOICE_NOT_PENDING", message: `Invoice status is "${data.status}", not "pending". Cannot send emails for non-pending invoices.` },
+        { status: 403 }
+      );
+    }
+
     // Check if this week's late email already sent (idempotency check)
     // Note: assertEmailLimits in sendEmailSafe will also check trial limits (max 3 chase emails, weeks 1-3 only)
     const emailEventsRef = db.collection("emailEvents");

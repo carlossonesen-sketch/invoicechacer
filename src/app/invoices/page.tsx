@@ -70,6 +70,8 @@ export default function InvoicesPage() {
     }
 
     // Set up real-time subscription - ALWAYS includes userId filter
+    // This subscription automatically updates when invoices change in Firestore
+    // (e.g., when an invoice is marked as paid via the API endpoint)
     const unsubscribe = subscribeToUserInvoices(user, (result: InvoiceSubscriptionResult) => {
       if (result.error) {
         console.error("Error loading invoices:", result.error);
@@ -77,6 +79,9 @@ export default function InvoicesPage() {
         return;
       }
       
+      // Update invoices - filteredInvoices will automatically recalculate via useMemo
+      // Paid invoices will be filtered out if statusFilter === "pending"
+      // Paid invoices will show with "Paid" badge if statusFilter !== "pending"
       setAllInvoices(result.invoices || []);
       setLastDoc(result.lastDoc);
       setHasMore(result.hasMore || false);
@@ -144,14 +149,17 @@ export default function InvoicesPage() {
 
   const handleMarkPaid = useCallback(async (invoiceId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      await markInvoicePaid(invoiceId);
-      showToast("Marked paid");
-      // Invoices will update automatically via real-time subscription
-    } catch (error: any) {
-      console.error("Failed to mark invoice as paid:", error);
-      showToast(error.message || "Failed to mark as paid", "error");
-    }
+    
+    await markInvoicePaid(
+      invoiceId,
+      () => {
+        // Success - invoices will update automatically via real-time subscription
+        showToast("Invoice marked as paid", "success");
+      },
+      (errorMessage) => {
+        showToast(errorMessage, "error");
+      }
+    );
   }, [showToast]);
 
   const handleNewInvoice = useCallback((e: React.MouseEvent) => {
@@ -282,7 +290,9 @@ export default function InvoicesPage() {
                             <DateLabel date={typeof invoice.dueAt === "string" ? invoice.dueAt : invoice.dueAt.toDate().toISOString()} />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            {invoice.autoChaseEnabled ? (
+                            {isPaid ? (
+                              <span className="text-sm text-gray-400">—</span>
+                            ) : invoice.autoChaseEnabled ? (
                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
                                 Enabled
                               </span>
@@ -291,7 +301,9 @@ export default function InvoicesPage() {
                             )}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {invoice.nextChaseAt ? (
+                            {isPaid ? (
+                              <span className="text-gray-400">—</span>
+                            ) : invoice.nextChaseAt ? (
                               <DateLabel date={typeof invoice.nextChaseAt === "string" ? invoice.nextChaseAt : invoice.nextChaseAt.toDate().toISOString()} />
                             ) : (
                               <span className="text-gray-400">—</span>

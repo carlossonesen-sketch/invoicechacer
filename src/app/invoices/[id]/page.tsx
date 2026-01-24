@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter, useParams, useSearchParams, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, firebaseUnavailable } from "@/lib/firebase";
-import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, markInvoicePaid, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
+import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
 import { dateInputToTimestamp, timestampToDateInput, formatDateOnly } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
@@ -17,6 +17,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { FormField } from "@/components/ui/form-field";
 import { UpgradeModal } from "@/components/ui/upgrade-modal";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { MarkPaidButton } from "@/app/invoices/[invoiceId]/MarkPaidButton";
 import { isValidEmail } from "@/lib/utils";
 import { useEntitlements } from "@/hooks/useEntitlements";
 import { useToast } from "@/components/ui/toast";
@@ -257,29 +259,6 @@ export default function InvoiceDetailPage() {
     }
   }
 
-  async function handleMarkPaid() {
-    if (!invoice) return;
-
-    if (!confirm("Mark this invoice as paid?")) {
-      return;
-    }
-
-    setSaving(true);
-    setSuccessMessage("");
-    setErrors({});
-
-    try {
-      await markInvoicePaid(invoice.id);
-      setSuccessMessage("Marked paid");
-      router.refresh();
-      setTimeout(() => setSuccessMessage(""), 3000);
-    } catch (error: any) {
-      console.error("Failed to mark invoice as paid:", error);
-      setErrors({ submit: error.message || "Failed to mark as paid. Please try again." });
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function handleTriggerChase() {
     if (!invoice) return;
@@ -457,27 +436,24 @@ export default function InvoiceDetailPage() {
               </div>
               <div className="flex gap-2 ml-4">
                 {!isEditing && invoice.status !== "paid" && (
-                  <>
-                    <Button 
-                      onClick={handleSendInvoice}
-                      disabled={sendingEmail || !invoice.customerEmail}
-                      className="bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      {sendingEmail ? "Sending..." : "Send Invoice"}
-                    </Button>
-                    <Button 
-                      onClick={handleMarkPaid}
-                      disabled={saving}
-                      className="bg-green-600 hover:bg-green-700 text-white"
-                    >
-                      {saving ? "Saving..." : "Mark Paid"}
-                    </Button>
-                  </>
+                  <Button 
+                    onClick={handleSendInvoice}
+                    disabled={sendingEmail || !invoice.customerEmail}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {sendingEmail ? "Sending..." : "Send Invoice"}
+                  </Button>
                 )}
                 {!isEditing && (
-                  <Button variant="secondary" onClick={() => setIsEditing(true)}>
-                    Edit
-                  </Button>
+                  <>
+                    <MarkPaidButton
+                      invoiceId={invoice.id}
+                      isPaid={invoice.status === "paid"}
+                    />
+                    <Button variant="secondary" onClick={() => setIsEditing(true)}>
+                      Edit
+                    </Button>
+                  </>
                 )}
               </div>
             </div>
@@ -650,7 +626,7 @@ export default function InvoiceDetailPage() {
                   )}
 
                   {/* Dev-only trigger button in edit mode */}
-                  {isDev && formData.autoChaseEnabled && isPro && (
+                  {isDev && formData.autoChaseEnabled && isPro && invoice.status !== "paid" && (
                     <div className="pt-4 border-t border-gray-200">
                       <Button
                         type="button"
@@ -759,7 +735,7 @@ export default function InvoiceDetailPage() {
               <div className="pt-4 border-t border-gray-200">
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="text-md font-semibold text-gray-900">Auto-Chase Settings</h4>
-                  {isDev && invoice.autoChaseEnabled && (
+                  {isDev && invoice.autoChaseEnabled && invoice.status !== "paid" && (
                     <Button
                       type="button"
                       variant="secondary"

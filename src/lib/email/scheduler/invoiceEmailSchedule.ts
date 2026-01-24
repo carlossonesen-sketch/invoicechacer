@@ -89,8 +89,9 @@ export async function computeNextInvoiceEmailToSend(
   invoice: InvoiceForSchedule,
   now: Date = new Date()
 ): Promise<ScheduledEmail | null> {
-  // Skip if invoice is paid
-  if (invoice.status === "paid") {
+  // Hard guard: Only schedule emails for pending invoices
+  // Skip if invoice status is not "pending" (paid, overdue, etc.)
+  if (invoice.status !== "pending") {
     return null;
   }
 

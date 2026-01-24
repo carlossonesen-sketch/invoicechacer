@@ -77,6 +77,13 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
+        // Hard guard: Skip if invoice status is not "pending"
+        // This prevents emails from being sent even if nextChaseAt is set
+        if (data.status !== "pending") {
+          results.skipped++;
+          continue;
+        }
+
         // Convert to schedule format
         const invoice: InvoiceForSchedule = {
           id: doc.id,
