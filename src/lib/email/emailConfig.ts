@@ -5,6 +5,7 @@
 
 export interface EmailConfig {
   emailSendingEnabled: boolean;
+  emailDryRun: boolean;
   autoChaseEnabled: boolean;
   autoChaseDryRun: boolean;
   maxEmailsPerDayPerUser: number;
@@ -62,6 +63,7 @@ function parseBooleanEnv(value: string | undefined, defaultValue: boolean): bool
 export function getEmailConfig(): EmailConfig {
   return {
     emailSendingEnabled: parseBooleanEnv(process.env.EMAIL_SENDING_ENABLED, false),
+    emailDryRun: parseBooleanEnv(process.env.EMAIL_DRY_RUN, false),
     autoChaseEnabled: parseBooleanEnv(process.env.AUTOCHASE_ENABLED, false),
     autoChaseDryRun: parseBooleanEnv(process.env.AUTOCHASE_DRY_RUN, true),
     maxEmailsPerDayPerUser: parseIntEnv(process.env.MAX_EMAILS_PER_DAY_PER_USER, 25),

@@ -30,5 +30,23 @@ service cloud.firestore {
       allow create: if isOwnerCreate();
       allow update, delete: if isOwner();
     }
+
+    // User profiles live at /users/{uid}
+    // Users can only read/write their own profile
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // User subscriptions live at /users/{uid}/subscription/{docId}
+    // Users can only read/write their own subscription
+    match /users/{uid}/subscription/{docId} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Business profiles live at /businessProfiles/{uid}
+    // Users can only read/write their own business profile
+    match /businessProfiles/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
   }
 }

@@ -23,6 +23,7 @@ export interface FirestoreInvoice {
   lastChasedAt?: Timestamp | string;
   nextChaseAt?: Timestamp | string;
   updatedAt?: Timestamp | string;
+  paidAt?: Timestamp | string;
 }
 
 export interface InvoiceQueryResult {

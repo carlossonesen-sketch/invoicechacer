@@ -121,11 +121,38 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
     }
   }
 
-  // Step 1: Enforce kill switches
-  assertEmailSendingAllowed();
+  // Step 1: Check EMAIL_SENDING_ENABLED - if disabled, log and return early
+  if (!config.emailSendingEnabled) {
+    console.log("[EMAIL SENDING DISABLED] Email send blocked by EMAIL_SENDING_ENABLED=false", {
+      invoiceId,
+      recipient: to,
+      type,
+      userId,
+      subject,
+    });
+
+    // Write event with dryRun flag to track attempted sends
+    const event: EmailEvent = {
+      userId,
+      invoiceId,
+      type,
+      to,
+      originalTo: to,
+      subject,
+      dryRun: true,
+      createdAt: Timestamp.now(),
+      weekNumber: metadata?.weekNumber,
+      metadata: metadata ? { ...metadata } : undefined,
+    };
+
+    await writeEmailEvent(event);
+    return;
+  }
+
+  // Step 2: Enforce auto-chase kill switch
   assertAutoChaseAllowed();
 
-  // Step 2: Enforce rate limits (plan-aware, includes per-invoice type caps for trial)
+  // Step 3: Enforce rate limits (plan-aware, includes per-invoice type caps for trial)
   await assertEmailLimits({ 
     userId, 
     invoiceId,
@@ -133,19 +160,20 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
     weekNumber: metadata?.weekNumber,
   });
 
-  // Step 3: Apply domain allowlist redirect
+  // Step 4: Apply domain allowlist redirect
   const { finalEmail, redirected } = applyTestRedirect(to);
 
-  // Step 4: Handle DRY RUN mode
-  if (config.autoChaseDryRun) {
-    console.log("[EMAIL DRY RUN]", {
-      userId,
+  // Step 5: Handle DRY RUN mode (EMAIL_DRY_RUN or AUTOCHASE_DRY_RUN)
+  if (config.emailDryRun || config.autoChaseDryRun) {
+    const dryRunReason = config.emailDryRun ? "EMAIL_DRY_RUN=true" : "AUTOCHASE_DRY_RUN=true";
+    console.log(`[EMAIL DRY RUN] Email send blocked by ${dryRunReason}`, {
       invoiceId,
+      recipient: finalEmail,
+      originalRecipient: to,
       type,
-      originalTo: to,
-      finalTo: finalEmail,
-      redirected,
+      userId,
       subject,
+      redirected,
     });
 
     // Write event with dryRun flag
@@ -168,13 +196,30 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
     return;
   }
 
-  // Step 5: Real send (not dry run)
+  // Step 6: Real send (not disabled, not dry run)
+  console.log("[EMAIL SEND] Sending email", {
+    invoiceId,
+    recipient: finalEmail,
+    originalRecipient: to,
+    type,
+    userId,
+    subject,
+    redirected,
+  });
+
   try {
     await fakeEmailSend({
       to: finalEmail,
       subject,
       html,
       text,
+    });
+
+    console.log("[EMAIL SEND] Email sent successfully", {
+      invoiceId,
+      recipient: finalEmail,
+      type,
+      userId,
     });
 
     // Write event for successful send
@@ -196,10 +241,11 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
     await writeEmailEvent(event);
   } catch (error) {
     // Log error but don't write event for failed sends
-    console.error("[EMAIL SEND ERROR]", {
-      userId,
+    console.error("[EMAIL SEND ERROR] Failed to send email", {
       invoiceId,
-      to: finalEmail,
+      recipient: finalEmail,
+      type,
+      userId,
       error: error instanceof Error ? error.message : "Unknown error",
     });
     // Re-throw ApiError untouched so routes can use its status code

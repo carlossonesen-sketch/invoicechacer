@@ -162,9 +162,18 @@ export default function DashboardPage() {
     return { outstanding, overdue, paidLast30Days, totalInvoices };
   }, [allInvoices]);
 
-  // Memoize recent invoices list
+  const [showPaid, setShowPaid] = useState(false);
+
+  // Memoize recent invoices list (exclude paid by default unless showPaid is enabled)
   const recentInvoices = useMemo(() => {
-    return [...allInvoices]
+    let filtered = [...allInvoices];
+    
+    // Exclude paid invoices by default
+    if (!showPaid) {
+      filtered = filtered.filter(inv => inv.status !== "paid" && !inv.paidAt);
+    }
+    
+    return filtered
       .sort((a, b) => {
         const dateA = typeof a.updatedAt === "string" 
           ? new Date(a.updatedAt) 
@@ -175,7 +184,7 @@ export default function DashboardPage() {
         return dateB.getTime() - dateA.getTime();
       })
       .slice(0, 10);
-  }, [allInvoices]);
+  }, [allInvoices, showPaid]);
 
   const handleLoadMore = useCallback(async () => {
     if (!user || !result.lastDoc || loadingMore) return;
@@ -203,14 +212,20 @@ export default function DashboardPage() {
   const handleMarkPaid = useCallback(async (invoiceId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     
-    // Store original status for potential revert
+    // Store original invoice for potential revert
     const originalInvoice = allInvoices.find((inv) => inv.id === invoiceId);
-    const originalStatus = originalInvoice?.status || "pending";
     
     // Optimistically update the invoice status
+    const now = new Date().toISOString();
     setAllInvoices((prev) =>
       prev.map((inv) =>
-        inv.id === invoiceId ? { ...inv, status: "paid" as const } : inv
+        inv.id === invoiceId
+          ? {
+              ...inv,
+              status: "paid" as const,
+              paidAt: now,
+            }
+          : inv
       )
     );
     
@@ -225,7 +240,13 @@ export default function DashboardPage() {
         // Revert optimistic update on error
         setAllInvoices((prev) =>
           prev.map((inv) =>
-            inv.id === invoiceId ? { ...inv, status: originalStatus as "pending" | "overdue" | "paid" } : inv
+            inv.id === invoiceId
+              ? {
+                  ...inv,
+                  status: originalInvoice?.status || "pending",
+                  paidAt: originalInvoice?.paidAt,
+                }
+              : inv
           )
         );
         showToast(errorMessage, "error");
@@ -346,8 +367,20 @@ export default function DashboardPage() {
 
           {/* Recently Updated Invoices */}
           <div className="bg-white rounded-lg border border-gray-200">
-            <div className="px-6 py-4 border-b border-gray-200">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-gray-900">Recently Updated Invoices</h3>
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="showPaid"
+                  checked={showPaid}
+                  onChange={(e) => setShowPaid(e.target.checked)}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="showPaid" className="ml-2 block text-sm text-gray-700">
+                  Show paid
+                </label>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
@@ -388,7 +421,10 @@ export default function DashboardPage() {
                       const updatedDate = typeof invoice.updatedAt === "string" 
                         ? new Date(invoice.updatedAt) 
                         : invoice.updatedAt?.toDate?.() || new Date(invoice.createdAt as string);
-                      const isPaid = invoice.status === "paid";
+                      const isPaid = invoice.status === "paid" || !!invoice.paidAt;
+                      const paidDate = invoice.paidAt 
+                        ? (typeof invoice.paidAt === "string" ? new Date(invoice.paidAt) : invoice.paidAt.toDate())
+                        : null;
                       
                       return (
                         <tr
@@ -404,7 +440,14 @@ export default function DashboardPage() {
                             <Currency cents={invoice.amount || 0} />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <StatusBadge status={invoice.status} />
+                            <div className="flex flex-col gap-1">
+                              <StatusBadge status={invoice.status} />
+                              {isPaid && paidDate && (
+                                <div className="text-xs text-gray-500">
+                                  Paid on <DateLabel date={paidDate} />
+                                </div>
+                              )}
+                            </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             <DateLabel date={dueDate} />

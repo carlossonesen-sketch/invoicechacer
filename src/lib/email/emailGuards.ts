@@ -64,6 +64,10 @@ export function applyTestRedirect(originalEmail: string): { finalEmail: string; 
  * Assert that email sending is enabled
  * Throws if EMAIL_SENDING_ENABLED is not true
  * In development (NODE_ENV !== "production"), also allows enabling via NEXT_PUBLIC_DEV_TOOLS=1
+ * 
+ * NOTE: This function is kept for backward compatibility, but sendEmailSafe now handles
+ * EMAIL_SENDING_ENABLED check directly with logging. This function may still be called
+ * by other code paths that need to check before attempting to send.
  */
 export function assertEmailSendingAllowed(): void {
   const config = getEmailConfig();

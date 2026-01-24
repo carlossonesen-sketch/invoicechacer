@@ -93,11 +93,14 @@ export default function PricingPage() {
     return () => unsubscribe();
   }, []);
 
-  function handleStartTrial() {
+  function handleStartTrial(tierId?: string) {
+    const plan = tierId || "pro"; // Default to pro if no tier specified
+    const trialUrl = `/trial?plan=${plan}`;
+    
     if (isLoggedIn) {
-      router.push("/trial");
+      router.push(trialUrl);
     } else {
-      router.push("/login?redirect=/trial");
+      router.push(`/login?redirect=${encodeURIComponent(trialUrl)}`);
     }
   }
 
@@ -115,13 +118,13 @@ export default function PricingPage() {
         {/* Hero Section */}
         <div className="text-center mb-16">
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-            Stop awkward payment follow-ups. Get paid faster—automatically.
+            Stop awkward payment follow-ups. Get paid faster — automatically.
           </h1>
           <p className="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
             Invoice Chaser sends polite reminders, escalates when needed, and stops when they pay or reply.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button onClick={handleStartTrial} size="lg">
+            <Button onClick={() => handleStartTrial()} size="lg">
               Start free trial
             </Button>
             <Button onClick={handleSeeHowItWorks} variant="secondary" size="lg">
@@ -188,7 +191,7 @@ export default function PricingPage() {
                 </ul>
               </div>
               <Button
-                onClick={handleStartTrial}
+                onClick={() => handleStartTrial(tier.id)}
                 variant={tier.popular ? undefined : "secondary"}
                 className="w-full"
               >
@@ -242,7 +245,7 @@ export default function PricingPage() {
             No credit card required. Get started today and see how Invoice Chaser helps you get paid faster.
           </p>
           <Button
-            onClick={handleStartTrial}
+            onClick={() => handleStartTrial()}
             variant="secondary"
             size="lg"
             className="bg-white text-blue-600 hover:bg-gray-100"

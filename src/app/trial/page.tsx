@@ -46,14 +46,16 @@ const tiers = [
   },
 ];
 
+const VALID_PLANS = ["starter", "pro", "business"] as const;
+type ValidPlan = typeof VALID_PLANS[number];
+
 export default function TrialPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string>("");
+  const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
     if (!auth) {
@@ -66,56 +68,76 @@ export default function TrialPage() {
       setLoading(false);
 
       if (!currentUser) {
-        const redirect = searchParams.get("redirect") || "/trial";
+        const plan = searchParams.get("plan") || "pro";
+        const redirect = `/trial?plan=${plan}`;
         router.push(`/login?redirect=${encodeURIComponent(redirect)}`);
+        return;
       }
+
+      // User is logged in, process the plan
+      processPlan();
     });
 
     return () => unsubscribe();
-  }, [router, searchParams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
-  async function handleStartTrial() {
-    if (!selectedPlan) {
-      setError("Please select a plan");
-      return;
-    }
-
-    if (!user) {
-      router.push("/login?redirect=/trial");
-      return;
-    }
-
-    setStarting(true);
+  const processPlan = async () => {
+    if (processing) return;
+    
+    setProcessing(true);
     setError("");
 
     try {
-      // Store in localStorage (stub for now)
+      // Read plan from query param
+      const planParam = searchParams.get("plan") || "pro";
+      
+      // Validate plan
+      if (!VALID_PLANS.includes(planParam as ValidPlan)) {
+        setError(`Invalid plan: "${planParam}". Please choose starter, pro, or business.`);
+        setProcessing(false);
+        return;
+      }
+
+      const validPlan = planParam as ValidPlan;
+
+      // Save to localStorage
+      localStorage.setItem("invoicechaser_selectedPlan", validPlan);
+
+      // Store trial dates
       const trialStart = new Date();
       const trialEnd = new Date(trialStart);
       trialEnd.setDate(trialEnd.getDate() + 14); // 14-day trial
-
-      localStorage.setItem("invoicechaser_selectedPlan", selectedPlan);
       localStorage.setItem("invoicechaser_trialStartedAt", trialStart.toISOString());
       localStorage.setItem("invoicechaser_trialEndsAt", trialEnd.toISOString());
 
       // Call Firestore-ready stub function
-      await startTrial(user.uid, selectedPlan as "starter" | "pro" | "business");
+      if (user) {
+        await startTrial(user.uid, validPlan);
+      }
 
       // Redirect to dashboard
       router.push("/dashboard");
     } catch (err: any) {
       console.error("Failed to start trial:", err);
       setError(err.message || "Failed to start trial. Please try again.");
-      setStarting(false);
+      setProcessing(false);
     }
-  }
+  };
 
-  if (loading) {
+  if (loading || processing) {
     return (
       <AppLayout>
         <Header title="Start Free Trial" />
         <div className="flex-1 overflow-auto p-6">
-          <div className="text-center text-gray-500">Loading...</div>
+          <div className="max-w-2xl mx-auto text-center">
+            <div className="text-gray-500 mb-4">
+              {processing ? "Setting up your trial..." : "Loading..."}
+            </div>
+            {processing && (
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            )}
+          </div>
         </div>
       </AppLayout>
     );
@@ -125,99 +147,35 @@ export default function TrialPage() {
     return null; // Will redirect to login
   }
 
+  // Show error state if plan validation failed
+  if (error) {
+    return (
+      <AppLayout>
+        <Header title="Start Free Trial" />
+        <div className="flex-1 overflow-auto p-6">
+          <div className="max-w-2xl mx-auto">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-4">
+              <h2 className="text-lg font-semibold text-red-900 mb-2">
+                Invalid Plan
+              </h2>
+              <p className="text-sm text-red-800 mb-4">{error}</p>
+              <Button onClick={() => router.push("/pricing")} variant="secondary">
+                Go to Pricing
+              </Button>
+            </div>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // This should not be reached if plan processing succeeds (redirects to dashboard)
   return (
     <AppLayout>
       <Header title="Start Free Trial" />
       <div className="flex-1 overflow-auto p-6">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Choose Your Plan
-            </h1>
-            <p className="text-gray-600">
-              Start with a 14-day free trial. No credit card required.
-            </p>
-          </div>
-
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6">
-              <p className="text-sm text-red-800">{error}</p>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            {tiers.map((tier) => (
-              <div
-                key={tier.id}
-                onClick={() => setSelectedPlan(tier.id)}
-                className={`bg-white rounded-lg border-2 p-6 cursor-pointer transition-all ${
-                  selectedPlan === tier.id
-                    ? "border-blue-500 shadow-lg"
-                    : tier.popular
-                    ? "border-blue-200"
-                    : "border-gray-200 hover:border-gray-300"
-                }`}
-              >
-                {tier.popular && (
-                  <div className="text-center mb-3">
-                    <span className="bg-blue-500 text-white px-3 py-1 rounded-full text-xs font-medium">
-                      Most Popular
-                    </span>
-                  </div>
-                )}
-                <div className="text-center mb-4">
-                  <h3 className="text-xl font-bold text-gray-900 mb-1">
-                    {tier.name}
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-3">
-                    {tier.description}
-                  </p>
-                  <div>
-                    <span className="text-3xl font-bold text-gray-900">
-                      ${tier.price}
-                    </span>
-                    <span className="text-gray-600">/mo</span>
-                  </div>
-                </div>
-                <ul className="space-y-2 mb-4 text-sm text-gray-600">
-                  {tier.features.map((feature, index) => (
-                    <li key={index} className="flex items-start">
-                      <span className="text-blue-500 mr-2">✓</span>
-                      <span>{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-                <div className="text-center">
-                  <div
-                    className={`w-5 h-5 rounded-full border-2 mx-auto ${
-                      selectedPlan === tier.id
-                        ? "border-blue-500 bg-blue-500"
-                        : "border-gray-300"
-                    }`}
-                  >
-                    {selectedPlan === tier.id && (
-                      <div className="w-full h-full rounded-full bg-blue-500 flex items-center justify-center">
-                        <span className="text-white text-xs">✓</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="text-center">
-            <Button
-              onClick={handleStartTrial}
-              disabled={!selectedPlan || starting}
-              size="lg"
-            >
-              {starting ? "Starting trial..." : "Start free trial"}
-            </Button>
-            <p className="text-sm text-gray-600 mt-4">
-              Your trial will start immediately. We'll remind you before it ends.
-            </p>
-          </div>
+        <div className="max-w-2xl mx-auto text-center">
+          <div className="text-gray-500">Redirecting...</div>
         </div>
       </div>
     </AppLayout>

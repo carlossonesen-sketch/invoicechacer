@@ -24,7 +24,8 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "overdue" | "paid">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "overdue" | "paid">("pending");
+  const [showPaid, setShowPaid] = useState(false);
   const [allInvoices, setAllInvoices] = useState<FirestoreInvoice[]>([]);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | undefined>(undefined);
   const [hasMore, setHasMore] = useState(false);
@@ -109,6 +110,11 @@ export default function InvoicesPage() {
       );
     }
 
+    // Exclude paid invoices by default unless "Show paid" is enabled
+    if (!showPaid) {
+      filtered = filtered.filter(inv => inv.status !== "paid");
+    }
+
     // Apply status filter (including computed overdue)
     if (statusFilter !== "all") {
       const now = new Date();
@@ -123,7 +129,7 @@ export default function InvoicesPage() {
     }
 
     return filtered;
-  }, [allInvoices, search, statusFilter]);
+  }, [allInvoices, search, statusFilter, showPaid]);
 
   const handleLoadMore = useCallback(async () => {
     if (!user || !lastDoc || loadingMore || !hasMore) return;
@@ -150,6 +156,20 @@ export default function InvoicesPage() {
   const handleMarkPaid = useCallback(async (invoiceId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     
+    // Optimistically update the invoice status
+    const now = new Date().toISOString();
+    setAllInvoices((prev) =>
+      prev.map((inv) =>
+        inv.id === invoiceId
+          ? {
+              ...inv,
+              status: "paid" as const,
+              paidAt: now,
+            }
+          : inv
+      )
+    );
+    
     await markInvoicePaid(
       invoiceId,
       () => {
@@ -157,10 +177,24 @@ export default function InvoicesPage() {
         showToast("Invoice marked as paid", "success");
       },
       (errorMessage) => {
+        // Revert optimistic update on error
+        setAllInvoices((prev) =>
+          prev.map((inv) => {
+            if (inv.id === invoiceId) {
+              const original = allInvoices.find((i) => i.id === invoiceId);
+              return {
+                ...inv,
+                status: original?.status || "pending",
+                paidAt: original?.paidAt,
+              };
+            }
+            return inv;
+          })
+        );
         showToast(errorMessage, "error");
       }
     );
-  }, [showToast]);
+  }, [showToast, allInvoices]);
 
   const handleNewInvoice = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -222,6 +256,18 @@ export default function InvoicesPage() {
                   <option value="paid">Paid</option>
                 </Select>
               </div>
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="showPaid"
+                  checked={showPaid}
+                  onChange={(e) => setShowPaid(e.target.checked)}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="showPaid" className="ml-2 block text-sm text-gray-700">
+                  Show paid
+                </label>
+              </div>
             </div>
           </div>
 
@@ -269,7 +315,10 @@ export default function InvoicesPage() {
                     </tr>
                   ) : (
                     filteredInvoices.map((invoice) => {
-                      const isPaid = invoice.status === "paid";
+                      const isPaid = invoice.status === "paid" || !!invoice.paidAt;
+                      const paidDate = invoice.paidAt 
+                        ? (typeof invoice.paidAt === "string" ? new Date(invoice.paidAt) : invoice.paidAt.toDate())
+                        : null;
                       return (
                         <tr
                           key={invoice.id}
@@ -284,7 +333,14 @@ export default function InvoicesPage() {
                             <Currency cents={invoice.amount} />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <StatusBadge status={invoice.status} />
+                            <div className="flex flex-col gap-1">
+                              <StatusBadge status={invoice.status} />
+                              {isPaid && paidDate && (
+                                <div className="text-xs text-gray-500">
+                                  Paid on <DateLabel date={paidDate} />
+                                </div>
+                              )}
+                            </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             <DateLabel date={typeof invoice.dueAt === "string" ? invoice.dueAt : invoice.dueAt.toDate().toISOString()} />

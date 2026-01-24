@@ -431,6 +431,22 @@ export default function InvoiceDetailPage() {
                     <div className="text-lg font-semibold text-gray-900">
                       <DateLabel date={dueDateForDisplay} />
                     </div>
+                    {(invoice.status === "paid" || invoice.paidAt) && (
+                      <div className="mt-2">
+                        <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Paid on</div>
+                        <div className="text-sm font-semibold text-green-600">
+                          <DateLabel 
+                            date={
+                              invoice.paidAt
+                                ? (typeof invoice.paidAt === "string" 
+                                    ? new Date(invoice.paidAt) 
+                                    : invoice.paidAt.toDate())
+                                : new Date()
+                            } 
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -448,7 +464,7 @@ export default function InvoiceDetailPage() {
                   <>
                     <MarkPaidButton
                       invoiceId={invoice.id}
-                      isPaid={invoice.status === "paid"}
+                      isPaid={invoice.status === "paid" || !!invoice.paidAt}
                     />
                     <Button variant="secondary" onClick={() => setIsEditing(true)}>
                       Edit
