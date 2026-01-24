@@ -24,7 +24,7 @@ export async function getAuthenticatedUserId(request: NextRequest): Promise<stri
       try {
         const decodedToken = await adminAuth.verifyIdToken(idToken);
         return decodedToken.uid;
-      } catch (error) {
+      } catch {
         throw new Error("UNAUTHORIZED: Invalid or expired ID token");
       }
     }
@@ -36,7 +36,7 @@ export async function getAuthenticatedUserId(request: NextRequest): Promise<stri
     try {
       const decodedToken = await adminAuth.verifyIdToken(sessionCookie.value);
       return decodedToken.uid;
-    } catch (error) {
+    } catch {
       throw new Error("UNAUTHORIZED: Invalid or expired session token");
     }
   }

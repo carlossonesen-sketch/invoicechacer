@@ -107,9 +107,10 @@ export default function CompanySettingsPage() {
 
       setSuccessMessage("Company profile updated successfully!");
       setTimeout(() => setSuccessMessage(""), 3000);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to save company profile:", error);
-      setErrors({ submit: error.message || "Failed to save company profile. Please try again." });
+      const errorMessage = error instanceof Error ? error.message : "Failed to save company profile. Please try again.";
+      setErrors({ submit: errorMessage });
     } finally {
       setSaving(false);
     }

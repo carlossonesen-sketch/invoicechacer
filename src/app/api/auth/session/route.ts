@@ -6,8 +6,16 @@ import { getAuth } from "firebase-admin/auth";
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
 
+// Service account key type
+interface ServiceAccountKey {
+  project_id: string;
+  client_email: string;
+  private_key: string;
+  [key: string]: unknown;
+}
+
 // Sanitize and parse service account key
-function parseServiceAccountKey(rawKey: string | undefined): any | null {
+function parseServiceAccountKey(rawKey: string | undefined): ServiceAccountKey | null {
   if (!rawKey) {
     return null;
   }
@@ -17,14 +25,14 @@ function parseServiceAccountKey(rawKey: string | undefined): any | null {
     const trimmedRaw = rawKey.trim();
     
     // Parse JSON
-    const parsed = JSON.parse(trimmedRaw);
+    const parsed = JSON.parse(trimmedRaw) as ServiceAccountKey;
     
     // Sanitize credential fields
-    const sanitized = {
+    const sanitized: ServiceAccountKey = {
       ...parsed,
-      project_id: (parsed.project_id ?? "").trim(),
-      client_email: (parsed.client_email ?? "").trim(),
-      private_key: (parsed.private_key ?? "").replace(/\\n/g, "\n").trim(),
+      project_id: String(parsed.project_id ?? "").trim(),
+      client_email: String(parsed.client_email ?? "").trim(),
+      private_key: String(parsed.private_key ?? "").replace(/\\n/g, "\n").trim(),
     };
 
     return sanitized;
@@ -45,10 +53,12 @@ if (getApps().length === 0) {
     try {
       // Also sanitize project ID from environment
       const projectId = (process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "").trim();
+      // TypeScript now knows serviceAccount is non-null in this block
+      const account = serviceAccount;
       
       adminApp = initializeApp({
-        credential: cert(serviceAccount),
-        projectId: projectId || serviceAccount.project_id,
+        credential: cert(account as unknown as { projectId: string; clientEmail: string; privateKey: string }),
+        projectId: projectId || account.project_id,
       });
     } catch (error) {
       console.error("Failed to initialize Firebase Admin:", error instanceof Error ? error.message : "Unknown error");
@@ -99,36 +109,39 @@ export async function POST(request: NextRequest) {
       uid: decodedToken.uid,
       email: decodedToken.email,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Safe debug logging (no secrets)
     const projectId = adminApp?.options.projectId;
     const projectIdHasWhitespace = projectId ? /\s/.test(projectId) : false;
     const projectIdLength = projectId?.length ?? 0;
     
+    const errorCode = error && typeof error === "object" && "code" in error ? String(error.code) : undefined;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
     console.error("Session creation error:", {
-      code: error.code,
-      message: error.message,
+      code: errorCode,
+      message: errorMessage,
       projectIdLength,
       projectIdHasWhitespace,
       hasAdminApp: !!adminApp,
     });
     
-    if (error.code === "auth/id-token-expired") {
+    if (errorCode === "auth/id-token-expired") {
       return NextResponse.json(
         { error: "Authentication token has expired. Please sign in again." },
         { status: 401 }
       );
     }
     
-    if (error.code === "auth/argument-error") {
+    if (errorCode === "auth/argument-error") {
       return NextResponse.json(
         { error: "Invalid authentication token format." },
         { status: 401 }
       );
     }
-
+    
     // Check for specific Firebase Auth errors
-    if (error.code?.startsWith("auth/")) {
+    if (errorCode?.startsWith("auth/")) {
       return NextResponse.json(
         { error: "Authentication verification failed. Please try signing in again." },
         { status: 401 }

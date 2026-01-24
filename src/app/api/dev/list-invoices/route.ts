@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
+import { getInvoicesRef } from "@/lib/invoicePaths";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
@@ -13,7 +14,8 @@ export const runtime = "nodejs";
 /**
  * List recent invoice IDs (dev only)
  */
-export async function GET(request: NextRequest) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- route signature requires request
+export async function GET(_request: NextRequest) {
   // Block in production
   if (process.env.NODE_ENV === "production") {
     return NextResponse.json(
@@ -27,13 +29,13 @@ export async function GET(request: NextRequest) {
     initFirebaseAdmin();
     const db = getAdminFirestore();
 
-    const invoicesRef = db.collection("invoices");
-    
+    const invoicesRef = getInvoicesRef(db);
+
     // Try to order by createdAt if it exists, otherwise just limit
     let query;
     try {
       query = invoicesRef.orderBy("createdAt", "desc").limit(20);
-    } catch (error) {
+    } catch {
       // If createdAt index doesn't exist, fallback to simple limit
       query = invoicesRef.limit(20);
     }

@@ -3,12 +3,11 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth, firebaseUnavailable } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
 import { createInvoicesBulk } from "@/lib/invoices";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { FormField } from "@/components/ui/form-field";
 import { isValidEmail } from "@/lib/utils";
@@ -41,7 +40,6 @@ export default function ImportInvoicesPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(false);
   const [csvData, setCsvData] = useState<CSVRow[]>([]);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({});
@@ -171,7 +169,6 @@ export default function ImportInvoicesPage() {
 
   function parseInvoices(data: CSVRow[], mapping: ColumnMapping) {
     const parsed: ParsedInvoice[] = [];
-    const errors: string[] = [];
 
     data.forEach((row, index) => {
       const invoice: ParsedInvoice = {
@@ -207,7 +204,7 @@ export default function ImportInvoicesPage() {
           if (invoice.amount <= 0) {
             invoice.errors.push("Amount must be greater than 0");
           }
-        } catch (error) {
+        } catch {
           invoice.errors.push("Invalid amount format");
         }
       } else {
@@ -218,8 +215,9 @@ export default function ImportInvoicesPage() {
       if (mapping.dueAt && row[mapping.dueAt]) {
         try {
           invoice.dueAt = parseDate(row[mapping.dueAt]);
-        } catch (error: any) {
-          invoice.errors.push(`Invalid date: ${error.message}`);
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : "Invalid date";
+          invoice.errors.push(`Invalid date: ${errorMessage}`);
         }
       }
 
@@ -288,9 +286,10 @@ export default function ImportInvoicesPage() {
           router.push("/dashboard");
         }, 2000);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Import error:", error);
-      alert(`Failed to import invoices: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      alert(`Failed to import invoices: ${errorMessage}`);
     } finally {
       setImporting(false);
     }

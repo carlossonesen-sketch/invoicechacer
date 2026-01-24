@@ -5,10 +5,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getAuthenticatedUserId } from "@/lib/api/auth";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { isApiError } from "@/lib/api/ApiError";
+import { resolveInvoiceRefAndBusinessId } from "@/lib/invoicePaths";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
@@ -38,11 +39,29 @@ export async function POST(
     const params = await Promise.resolve(context.params);
     const invoiceId = params.invoiceId;
 
+    // Validate invoiceId
     if (!invoiceId || typeof invoiceId !== "string") {
       return NextResponse.json(
         { error: "INVALID_INPUT", message: "Invoice ID is required" },
         { status: 400 }
       );
+    }
+
+    // Parse request body (optional paidAmountCents)
+    let bodyPaidAmountCents: number | undefined;
+    try {
+      const body = await request.json().catch(() => ({}));
+      if (body.paidAmountCents !== undefined) {
+        if (typeof body.paidAmountCents !== "number" || body.paidAmountCents < 0) {
+          return NextResponse.json(
+            { error: "INVALID_INPUT", message: "paidAmountCents must be a non-negative number" },
+            { status: 400 }
+          );
+        }
+        bodyPaidAmountCents = body.paidAmountCents;
+      }
+    } catch {
+      // If JSON parse fails, continue with empty body (paidAmountCents will be undefined)
     }
 
     // Authenticate user
@@ -65,64 +84,94 @@ export async function POST(
       );
     }
 
-    // Fetch invoice
-    const invoiceRef = db.collection("invoices").doc(invoiceId);
-    const invoiceDoc = await invoiceRef.get();
+    const { invoiceRef, businessId, exists, data: invoiceData } = await resolveInvoiceRefAndBusinessId(db, invoiceId);
 
-    if (!invoiceDoc.exists) {
+    if (!exists || !invoiceData) {
       return NextResponse.json(
         { error: "NOT_FOUND", message: "Invoice not found" },
         { status: 404 }
       );
     }
 
-    const invoiceData = invoiceDoc.data();
-    if (!invoiceData) {
-      return NextResponse.json(
-        { error: "NOT_FOUND", message: "Invoice data not found" },
-        { status: 404 }
-      );
-    }
-
-    // Verify invoice belongs to user
-    if (invoiceData.userId !== userId) {
+    // Verify invoice belongs to user (businessId === userId)
+    if (businessId !== userId) {
       return NextResponse.json(
         { error: "FORBIDDEN", message: "Invoice does not belong to you" },
         { status: 403 }
       );
     }
 
-    // Idempotent: if already paid, return success
-    if (invoiceData.status === "paid") {
-      return NextResponse.json({ ok: true });
-    }
+    type TxResult =
+      | { notFound: true }
+      | { idempotent: true; status: "paid"; paidAt: string | null; paidAmountCents: number }
+      | { idempotent: false; status: "paid"; paidAt: string; paidAmountCents: number };
 
-    // Prepare update data
-    const updateData: any = {
-      status: "paid",
-      paidAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-      nextChaseAt: null,
-      processingAt: null,
-    };
+    const txResult = await db.runTransaction(async (tx): Promise<TxResult> => {
+      const snap = await tx.get(invoiceRef);
+      if (!snap.exists) {
+        return { notFound: true };
+      }
+      const data = snap.data()!;
 
-    // Set autoChaseEnabled to false if it exists
-    if (invoiceData.autoChaseEnabled !== undefined) {
-      updateData.autoChaseEnabled = false;
-    }
+      // Idempotent: if already paid, return 200 with invoice unchanged
+      if (data.status === "paid") {
+        const pa = data.paidAt;
+        const paidAtStr =
+          pa && typeof pa === "object" && "toDate" in pa
+            ? (pa as Timestamp).toDate().toISOString()
+            : pa != null
+              ? String(pa)
+              : null;
+        return {
+          idempotent: true,
+          status: "paid",
+          paidAt: paidAtStr,
+          paidAmountCents: (data.paidAmountCents ?? data.amount ?? 0) as number,
+        };
+      }
 
-    // Update invoice
-    await invoiceRef.update(updateData);
+      const now = new Date();
+      const finalPaidAmountCents =
+        bodyPaidAmountCents !== undefined ? bodyPaidAmountCents : ((data.amount as number) || 0);
+      const paidMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-    // Append chaseEvent to chaseEvents subcollection
-    const chaseEventsRef = invoiceRef.collection("chaseEvents");
-    await chaseEventsRef.add({
-      type: "MARK_PAID",
-      createdAt: FieldValue.serverTimestamp(),
-      actor: "user",
+      tx.update(invoiceRef, {
+        paidAt: Timestamp.fromDate(now),
+        paidMonthKey,
+        status: "paid",
+        paidAmountCents: finalPaidAmountCents,
+        updatedAt: FieldValue.serverTimestamp(),
+        nextChaseAt: null,
+        processingAt: null,
+        ...(data.autoChaseEnabled !== undefined && { autoChaseEnabled: false }),
+      });
+
+      tx.set(invoiceRef.collection("chaseEvents").doc(), {
+        type: "MARK_PAID",
+        createdAt: FieldValue.serverTimestamp(),
+        actor: "user",
+      });
+
+      return {
+        idempotent: false,
+        status: "paid",
+        paidAt: now.toISOString(),
+        paidAmountCents: finalPaidAmountCents,
+      };
     });
 
-    return NextResponse.json({ ok: true });
+    if ("notFound" in txResult && txResult.notFound) {
+      return NextResponse.json({ error: "NOT_FOUND", message: "Invoice not found" }, { status: 404 });
+    }
+
+    const res = txResult as Exclude<TxResult, { notFound: true }>;
+    return NextResponse.json({
+      ok: true,
+      invoiceId,
+      status: res.status,
+      paidAt: res.paidAt,
+      paidAmountCents: res.paidAmountCents,
+    });
   } catch (error) {
     console.error("[MARK PAID] Error:", error);
     

@@ -9,6 +9,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { getPlanForUser, getPlanLimits } from "@/lib/billing/plan";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { isApiError } from "@/lib/api/ApiError";
+import { getInvoicesRef } from "@/lib/invoicePaths";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
@@ -86,7 +87,7 @@ export async function POST(request: NextRequest) {
 
       if (planLimits.maxPendingInvoices !== Infinity) {
         // Count pending invoices for this user
-        const pendingInvoicesRef = db.collection("invoices");
+        const pendingInvoicesRef = getInvoicesRef(db);
         const pendingSnapshot = await pendingInvoicesRef
           .where("userId", "==", userId)
           .where("status", "==", "pending")
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create invoice
-    const invoicesRef = db.collection("invoices");
+    const invoicesRef = getInvoicesRef(db);
     const newInvoice = {
       userId,
       customerName: customerName.trim(),

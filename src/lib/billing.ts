@@ -63,7 +63,8 @@ export async function startTrial(uid: string, plan: "starter" | "pro" | "busines
  * @param uid - User ID
  * @returns Subscription info or null if no subscription
  */
-export async function getSubscription(uid: string): Promise<any | null> {
+export async function getSubscription(uid: string): Promise<unknown | null> {
+  void uid; // Reserved for Firestore read
   // Stub implementation
   // TODO: Read from Firestore and return subscription data
   
@@ -81,6 +82,7 @@ export async function getSubscription(uid: string): Promise<any | null> {
  * @param uid - User ID
  */
 export async function cancelSubscription(uid: string): Promise<void> {
+  void uid; // Reserved for Firestore/Stripe
   // Stub implementation
   // TODO: Update Firestore and call Stripe API
   
@@ -103,6 +105,8 @@ export async function changePlan(
   uid: string,
   newPlan: "starter" | "pro" | "business"
 ): Promise<void> {
+  void uid;
+  void newPlan; // Reserved for Firestore/Stripe
   // Stub implementation
   // TODO: Implement plan change logic with Stripe
   

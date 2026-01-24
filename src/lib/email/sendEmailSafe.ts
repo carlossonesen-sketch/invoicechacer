@@ -12,8 +12,9 @@
  */
 
 import { getAdminFirestore } from "@/lib/firebase-admin";
+import { getInvoiceRef } from "@/lib/invoicePaths";
 import { getEmailConfig } from "./emailConfig";
-import { assertEmailSendingAllowed, assertAutoChaseAllowed, applyTestRedirect } from "./emailGuards";
+import { assertAutoChaseAllowed, applyTestRedirect } from "./emailGuards";
 import { assertEmailLimits } from "./emailLimits";
 import { Timestamp } from "firebase-admin/firestore";
 import { ApiError, isApiError } from "@/lib/api/ApiError";
@@ -28,7 +29,7 @@ export interface SendEmailParams {
   type: "invoice" | "chase" | "reminder" | "invoice_initial" | "invoice_reminder" | "invoice_due" | "invoice_late_weekly";
   metadata?: {
     weekNumber?: number;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -42,7 +43,7 @@ export interface EmailEvent {
   dryRun: boolean;
   createdAt: Timestamp;
   weekNumber?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -68,11 +69,11 @@ async function fakeEmailSend(params: {
  * Remove undefined values from an object (shallow)
  * Firestore cannot accept undefined values, so we must exclude them
  */
-function compactUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
+function compactUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
   const result: Partial<T> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (value !== undefined) {
-      result[key as keyof T] = value;
+      result[key as keyof T] = value as T[keyof T];
     }
   }
   return result;
@@ -90,7 +91,7 @@ async function writeEmailEvent(event: EmailEvent): Promise<void> {
 
   // Remove undefined fields before writing to Firestore
   // Firestore throws "Cannot use undefined as a Firestore value" if undefined is present
-  const cleanEvent = compactUndefined(event);
+  const cleanEvent = compactUndefined(event as unknown as Record<string, unknown>);
 
   const emailEventsRef = db.collection("emailEvents");
   await emailEventsRef.add(cleanEvent);
@@ -107,7 +108,7 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
   // This prevents emails from being sent to paid or overdue invoices
   const db = getAdminFirestore();
   if (db && invoiceId) {
-    const invoiceRef = db.collection("invoices").doc(invoiceId);
+    const invoiceRef = getInvoiceRef(db, invoiceId);
     const invoiceDoc = await invoiceRef.get();
     if (invoiceDoc.exists) {
       const invoiceData = invoiceDoc.data();

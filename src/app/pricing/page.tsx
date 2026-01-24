@@ -6,7 +6,6 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
-import { AppLayout } from "@/components/layout/app-layout";
 
 const tiers = [
   {

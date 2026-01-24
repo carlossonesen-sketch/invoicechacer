@@ -47,6 +47,11 @@ service cloud.firestore {
     // Users can only read/write their own business profile
     match /businessProfiles/{uid} {
       allow read, write: if signedIn() && request.auth.uid == uid;
+      
+      // Stats subcollection for business profiles
+      match /stats/{docId} {
+        allow read, write: if signedIn() && request.auth.uid == uid;
+      }
     }
   }
 }

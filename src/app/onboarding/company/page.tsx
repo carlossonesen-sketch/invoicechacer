@@ -85,9 +85,10 @@ export default function CompanyOnboardingPage() {
         console.trace("redirect->dashboard trace");
       }
       router.push("/dashboard");
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to save company profile:", error);
-      setErrors({ submit: error.message || "Failed to save company profile. Please try again." });
+      const errorMessage = error instanceof Error ? error.message : "Failed to save company profile. Please try again.";
+      setErrors({ submit: errorMessage });
       setSaving(false);
     }
   }
@@ -112,7 +113,7 @@ export default function CompanyOnboardingPage() {
             <div>
               <h2 className="text-xl font-semibold text-gray-900 mb-2">Welcome to Invoice Chaser!</h2>
               <p className="text-sm text-gray-600">
-                Let's set up your company profile to get started.
+                Let&apos;s set up your company profile to get started.
               </p>
             </div>
 

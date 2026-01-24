@@ -16,7 +16,7 @@
 import { getAdminFirestore } from "@/lib/firebase-admin";
 import { getEmailConfig } from "./emailConfig";
 import { Timestamp } from "firebase-admin/firestore";
-import { getPlanForUser, getPlanLimits, Plan } from "@/lib/billing/plan";
+import { getPlanForUser, getPlanLimits } from "@/lib/billing/plan";
 import { ApiError } from "@/lib/api/ApiError";
 
 export interface EmailLimitParams {
@@ -57,7 +57,7 @@ async function countUserEmailsToday(userId: string): Promise<number> {
       .get();
     
     return snapshot.data().count;
-  } catch (error) {
+  } catch {
     // Fallback: fetch limited docs and count
     // This is safe because we're only counting, not reading all data
     const snapshot = await emailEventsRef
@@ -89,7 +89,7 @@ async function countGlobalEmailsToday(): Promise<number> {
       .get();
     
     return snapshot.data().count;
-  } catch (error) {
+  } catch {
     // Fallback: fetch limited docs and count
     const snapshot = await emailEventsRef
       .where("createdAt", ">=", startOfDay)
@@ -146,13 +146,13 @@ export async function countInvoiceEmailEvents(
 
   // For late weekly emails, also filter by weekNumber
   if (type === "invoice_late_weekly" && weekNumber !== undefined) {
-    query = query.where("weekNumber", "==", weekNumber) as any;
+    query = query.where("weekNumber", "==", weekNumber);
   }
 
   try {
     const snapshot = await query.count().get();
     return snapshot.data().count;
-  } catch (error) {
+  } catch {
     // Fallback: fetch and count
     const snapshot = await query.limit(100).get();
     return snapshot.size;
@@ -179,7 +179,7 @@ async function countInvoiceChaseEmails(invoiceId: string): Promise<number> {
       .get();
     
     return snapshot.data().count;
-  } catch (error) {
+  } catch {
     // Fallback: fetch and count
     const snapshot = await emailEventsRef
       .where("invoiceId", "==", invoiceId)

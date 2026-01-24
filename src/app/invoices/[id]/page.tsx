@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter, useParams, useSearchParams, usePathname } from "next/navigation";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
-import { dateInputToTimestamp, timestampToDateInput, formatDateOnly } from "@/lib/dates";
+import { dateInputToTimestamp, timestampToDateInput } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -17,7 +17,6 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { FormField } from "@/components/ui/form-field";
 import { UpgradeModal } from "@/components/ui/upgrade-modal";
-import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { MarkPaidButton } from "@/app/invoices/[invoiceId]/MarkPaidButton";
 import { isValidEmail } from "@/lib/utils";
 import { useEntitlements } from "@/hooks/useEntitlements";
@@ -45,7 +44,7 @@ export default function InvoiceDetailPage() {
   const [successMessage, setSuccessMessage] = useState<string>("");
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const { isPro } = useEntitlements();
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [isDev, setIsDev] = useState(false);
   const didRedirectRef = useRef<boolean>(false);
   const { showToast, ToastComponent } = useToast();
@@ -251,9 +250,10 @@ export default function InvoiceDetailPage() {
       
       // Clear success message after 3 seconds
       setTimeout(() => setSuccessMessage(""), 3000);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to update invoice:", error);
-      setErrors({ submit: error.message || "Failed to update invoice. Please try again." });
+      const errorMessage = error instanceof Error ? error.message : "Failed to update invoice. Please try again.";
+      setErrors({ submit: errorMessage });
     } finally {
       setSaving(false);
     }
@@ -271,9 +271,10 @@ export default function InvoiceDetailPage() {
       await triggerChaseNow(invoice.id);
       setSuccessMessage("Chase triggered successfully! The cloud function will process it on its next run.");
       setTimeout(() => setSuccessMessage(""), 5000);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to trigger chase:", error);
-      setErrors({ submit: error.message || "Failed to trigger chase. Please try again." });
+      const errorMessage = error instanceof Error ? error.message : "Failed to trigger chase. Please try again.";
+      setErrors({ submit: errorMessage });
     } finally {
       setSaving(false);
     }
@@ -313,10 +314,11 @@ export default function InvoiceDetailPage() {
         setSuccessMessage("Invoice email sent");
         setTimeout(() => setSuccessMessage(""), 3000);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to send invoice email:", error);
-      showToast(error.message || "Failed to send email. Please try again.", "error");
-      setErrors({ submit: error.message || "Failed to send email. Please try again." });
+      const errorMessage = error instanceof Error ? error.message : "Failed to send email. Please try again.";
+      showToast(errorMessage, "error");
+      setErrors({ submit: errorMessage });
     } finally {
       setSendingEmail(false);
     }
@@ -386,7 +388,7 @@ export default function InvoiceDetailPage() {
         <div className="flex-1 overflow-auto p-6">
           <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-red-900 mb-2">Access Denied</h3>
-            <p className="text-red-800">You don't have permission to view this invoice.</p>
+            <p className="text-red-800">You don&apos;t have permission to view this invoice.</p>
           </div>
         </div>
       </AppLayout>
@@ -465,6 +467,15 @@ export default function InvoiceDetailPage() {
                     <MarkPaidButton
                       invoiceId={invoice.id}
                       isPaid={invoice.status === "paid" || !!invoice.paidAt}
+                      onSuccess={(updatedInvoice) => {
+                        // Optimistically update local invoice state
+                        if (invoice) {
+                          setInvoice({
+                            ...invoice,
+                            ...updatedInvoice,
+                          });
+                        }
+                      }}
                     />
                     <Button variant="secondary" onClick={() => setIsEditing(true)}>
                       Edit

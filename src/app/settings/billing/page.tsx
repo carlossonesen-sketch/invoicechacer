@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth, db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { useEntitlements } from "@/hooks/useEntitlements";
 import { EntitlementsService } from "@/lib/entitlements";
-import Link from "next/link";
 
 type PlanId = "starter" | "pro" | "business" | "free";
 
@@ -59,13 +61,65 @@ export default function BillingPage() {
   const router = useRouter();
   const { isPro, loading } = useEntitlements();
   const [isDev, setIsDev] = useState(false);
-  const [upgrading, setUpgrading] = useState(false);
+  const [, setUpgrading] = useState(false);
+  const [planFromFirestore, setPlanFromFirestore] = useState<PlanId | null>(null);
+  const [loadingPlan, setLoadingPlan] = useState(true);
   
-  // Determine current plan
+  // Load plan from Firestore
+  useEffect(() => {
+    if (!auth || !db) {
+      setLoadingPlan(false);
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        setLoadingPlan(false);
+        return;
+      }
+
+      // Load plan from Firestore
+      if (!db) {
+        setLoadingPlan(false);
+        return;
+      }
+
+      (async () => {
+        try {
+          // Read from Firestore first (source of truth)
+          const profileRef = doc(db, "businessProfiles", user.uid);
+          const profileSnap = await getDoc(profileRef);
+          
+          if (profileSnap.exists()) {
+            const data = profileSnap.data();
+            const plan = data?.plan || data?.trialTier;
+            if (plan && (plan === "starter" || plan === "pro" || plan === "business")) {
+              setPlanFromFirestore(plan as PlanId);
+              // Update localStorage cache
+              localStorage.setItem("invoicechaser_selectedPlan", plan);
+            }
+          }
+        } catch (error) {
+          console.error("Failed to load plan from Firestore:", error);
+        } finally {
+          setLoadingPlan(false);
+        }
+      })();
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Determine current plan (Firestore first, then localStorage cache, then legacy)
   const currentPlan = useMemo<PlanId>(() => {
     if (typeof window === "undefined") return "free";
     
-    // Check localStorage for selected plan (from trial)
+    // First priority: plan from Firestore
+    if (planFromFirestore) {
+      return planFromFirestore;
+    }
+    
+    // Second priority: localStorage cache (from trial or previous Firestore read)
     const selectedPlan = localStorage.getItem("invoicechaser_selectedPlan") as PlanId | null;
     if (selectedPlan && (selectedPlan === "starter" || selectedPlan === "pro" || selectedPlan === "business")) {
       return selectedPlan;
@@ -77,7 +131,7 @@ export default function BillingPage() {
     }
     
     return "free";
-  }, [isPro]);
+  }, [planFromFirestore, isPro]);
   
   const planLimitsData = planLimits[currentPlan];
   const planPrice = planPrices[currentPlan];
@@ -87,7 +141,8 @@ export default function BillingPage() {
     setIsDev(devToolsEnabled);
   }, []);
 
-  function handleUpgrade() {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reserved for future upgrade CTA
+  function _handleUpgrade() {
     const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1" || process.env.NODE_ENV !== "production";
     
     if (!devToolsEnabled) {
@@ -104,14 +159,15 @@ export default function BillingPage() {
     }, 500);
   }
 
-  function handleDowngrade() {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reserved for future downgrade CTA
+  function _handleDowngrade() {
     if (!confirm("Are you sure you want to downgrade to Free plan? You'll lose access to Pro features.")) {
       return;
     }
     EntitlementsService.setPro(false);
   }
 
-  if (loading) {
+  if (loading || loadingPlan) {
     return (
       <AppLayout>
         <Header title="Billing" />

@@ -39,10 +39,16 @@ export function initFirebaseAdmin(): void {
   }
 
   // Parse JSON with helpful error messages
-  let serviceAccount: any;
+  interface ServiceAccountKey {
+    project_id: string;
+    client_email: string;
+    private_key: string;
+    [key: string]: unknown;
+  }
+  let serviceAccount: ServiceAccountKey | null = null;
   try {
     const trimmedRaw = rawKey.trim();
-    const parsed = JSON.parse(trimmedRaw);
+    const parsed = JSON.parse(trimmedRaw) as ServiceAccountKey;
     
     // Validate required fields
     if (!parsed.private_key || !parsed.client_email || !parsed.project_id) {
@@ -52,9 +58,9 @@ export function initFirebaseAdmin(): void {
     // Sanitize and prepare service account
     serviceAccount = {
       ...parsed,
-      project_id: (parsed.project_id ?? "").trim(),
-      client_email: (parsed.client_email ?? "").trim(),
-      private_key: (parsed.private_key ?? "").replace(/\\n/g, "\n").trim(),
+      project_id: String(parsed.project_id ?? "").trim(),
+      client_email: String(parsed.client_email ?? "").trim(),
+      private_key: String(parsed.private_key ?? "").replace(/\\n/g, "\n").trim(),
     };
   } catch (error) {
     if (error instanceof SyntaxError) {
@@ -65,6 +71,11 @@ export function initFirebaseAdmin(): void {
       );
     }
     throw error;
+  }
+
+  // Safety check: Verify service account is not null
+  if (!serviceAccount) {
+    throw new Error("Service account key is null after parsing");
   }
 
   // Safety check: Verify service account project_id matches environment project ID
@@ -81,9 +92,13 @@ export function initFirebaseAdmin(): void {
   // Initialize Firebase Admin
   try {
     const projectId = envProjectId || serviceAccount.project_id;
-    
+    // cert() expects ServiceAccount (projectId, clientEmail, privateKey); we parse snake_case from JSON
     adminApp = initializeApp({
-      credential: cert(serviceAccount),
+      credential: cert({
+        projectId: serviceAccount.project_id,
+        clientEmail: serviceAccount.client_email,
+        privateKey: serviceAccount.private_key,
+      }),
       projectId: projectId,
     });
   } catch (error) {

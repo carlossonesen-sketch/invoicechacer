@@ -168,10 +168,11 @@ export default function NewInvoicePage() {
         maxChases: 3,
       });
       setLoading(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to create invoice:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to create invoice. Please try again.";
       setErrors({ 
-        submit: error.message || "Failed to create invoice. Please try again." 
+        submit: errorMessage
       });
       setLoading(false);
     }

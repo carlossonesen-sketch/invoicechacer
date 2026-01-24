@@ -38,7 +38,6 @@ export interface InvoiceQueryResult {
 
 function convertSnapshotToInvoices(snapshot: QuerySnapshot<DocumentData>, user: User): FirestoreInvoice[] {
   const invoices: FirestoreInvoice[] = [];
-  let hasMissingCreatedAt = false;
 
   snapshot.forEach((doc) => {
     // Use serverTimestamps: "estimate" to get estimated timestamps during pending window
@@ -47,7 +46,6 @@ function convertSnapshotToInvoices(snapshot: QuerySnapshot<DocumentData>, user: 
     // Check if createdAt is missing (dev-only log)
     if (!data.createdAt && process.env.NODE_ENV !== "production") {
       console.warn(`[Dev] Invoice ${doc.id} missing createdAt timestamp`);
-      hasMissingCreatedAt = true;
     }
     
     // Convert Firestore invoice to our type with safe fallbacks
@@ -137,13 +135,15 @@ export function subscribeToUserInvoices(
           hasMore,
         });
       },
-      (error: any) => {
+      (error: unknown) => {
         console.error("Error subscribing to invoices:", error);
 
         // Check if this is a Firestore index error
-        if (error.code === "failed-precondition" || error.message?.includes("index")) {
+        const errorCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : undefined;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorCode === "failed-precondition" || errorMessage?.includes("index")) {
           // Try to extract the index link from the error
-          const indexLinkMatch = error.message?.match(/https:\/\/console\.firebase\.google\.com[^\s]+/);
+          const indexLinkMatch = errorMessage?.match(/https:\/\/console\.firebase\.google\.com[^\s]+/);
           const consoleLink = indexLinkMatch ? indexLinkMatch[0] : undefined;
 
           callback({
@@ -157,18 +157,19 @@ export function subscribeToUserInvoices(
         } else {
           callback({
             invoices: [],
-            error: error.message || "Failed to fetch invoices",
+            error: errorMessage || "Failed to fetch invoices",
           });
         }
       }
     );
 
     return unsubscribe;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error setting up invoice subscription:", error);
+    const errorMessage = error instanceof Error ? error.message : "Failed to set up invoice subscription";
     callback({
       invoices: [],
-      error: error.message || "Failed to set up invoice subscription",
+      error: errorMessage,
     });
     return () => {}; // Return empty unsubscribe function
   }
@@ -209,11 +210,11 @@ export async function fetchNextPageOfInvoices(
       lastDoc: nextLastDoc,
       hasMore,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error fetching next page of invoices:", error);
     return {
       invoices: [],
-      error: error.message || "Failed to fetch invoices",
+      error: error instanceof Error ? error.message : "Failed to fetch invoices",
     };
   }
 }
@@ -240,13 +241,16 @@ export async function getUserInvoices(user: User): Promise<InvoiceQueryResult> {
     const hasMissingCreatedAt = invoices.some(inv => !inv.createdAt || inv.createdAt === new Date().toISOString());
 
     return { invoices, hasMissingCreatedAt };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error fetching invoices:", error);
 
+    const err = error instanceof Error ? error : new Error(String(error));
+    const errMsg = err.message;
     // Check if this is a Firestore index error
-    if (error.code === "failed-precondition" || error.message?.includes("index")) {
+    const errObj = error && typeof error === "object" && "code" in error ? error as { code?: string; message?: string } : null;
+    if (errObj?.code === "failed-precondition" || errMsg?.includes("index")) {
       // Try to extract the index link from the error
-      const indexLinkMatch = error.message?.match(/https:\/\/console\.firebase\.google\.com[^\s]+/);
+      const indexLinkMatch = errMsg?.match(/https:\/\/console\.firebase\.google\.com[^\s]+/);
       const consoleLink = indexLinkMatch ? indexLinkMatch[0] : undefined;
 
       return {
@@ -261,7 +265,7 @@ export async function getUserInvoices(user: User): Promise<InvoiceQueryResult> {
 
     return {
       invoices: [],
-      error: error.message || "Failed to fetch invoices",
+      error: errMsg || "Failed to fetch invoices",
     };
   }
 }
@@ -364,9 +368,10 @@ export async function createInvoicesBulk(
         const docRef = doc(invoicesRef);
         batch.set(docRef, newInvoice);
         chunkSuccessCount++;
-      } catch (error: any) {
+      } catch (error: unknown) {
         failed++;
-        errors.push(`Row ${invoiceIndex + 1}: ${error.message || "Failed to create invoice"}`);
+        const errorMessage = error instanceof Error ? error.message : "Failed to create invoice";
+        errors.push(`Row ${invoiceIndex + 1}: ${errorMessage}`);
       }
     }
 
@@ -375,11 +380,12 @@ export async function createInvoicesBulk(
         await batch.commit();
         success += chunkSuccessCount;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If batch fails, mark all in chunk as failed
       failed += chunkSuccessCount;
       success -= chunkSuccessCount; // Remove from success count
-      errors.push(`Batch ${Math.floor(i / batchSize) + 1}: ${error.message || "Batch write failed"}`);
+      const errorMessage = error instanceof Error ? error.message : "Batch write failed";
+      errors.push(`Batch ${Math.floor(i / batchSize) + 1}: ${errorMessage}`);
     }
   }
 
@@ -389,8 +395,12 @@ export async function createInvoicesBulk(
 function convertDocToInvoice(docData: DocumentData, docId: string, useServerTimestampEstimate: boolean = false): FirestoreInvoice {
   // If docData is a DocumentSnapshot, extract data with server timestamp estimate
   let data = docData;
-  if (useServerTimestampEstimate && typeof (docData as any).data === "function") {
-    data = (docData as any).data({ serverTimestamps: "estimate" });
+  // Type guard for DocumentSnapshot
+  interface DocumentSnapshotLike {
+    data: (options?: { serverTimestamps?: "estimate" | "previous" | "none" }) => DocumentData;
+  }
+  if (useServerTimestampEstimate && typeof docData === "object" && docData !== null && "data" in docData && typeof (docData as DocumentSnapshotLike).data === "function") {
+    data = (docData as DocumentSnapshotLike).data({ serverTimestamps: "estimate" });
   }
   
   const invoice: FirestoreInvoice = {
@@ -447,7 +457,7 @@ export function subscribeToInvoice(
 
     const unsubscribe = onDocSnapshot(
       invoiceRef,
-      (snapshot: any) => {
+      (snapshot) => {
         if (!snapshot.exists()) {
           callback(null, "Invoice not found");
           return;
@@ -456,28 +466,31 @@ export function subscribeToInvoice(
         const invoice = convertDocToInvoice(snapshot, snapshot.id, true);
         callback(invoice);
       },
-      (error: any) => {
+      (error: unknown) => {
         console.error("Error subscribing to invoice:", error);
         
+        const errorCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : undefined;
+        const errorMessage = error instanceof Error ? error.message : String(error);
         // Dev-only logging for permission errors
         const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-        if (devToolsEnabled && (error.code === "permission-denied" || error.message?.includes("permission"))) {
-          console.log(`[Invoice Detail] Permission denied for invoiceId: ${invoiceId}, error code: ${error.code}`);
+        if (devToolsEnabled && (errorCode === "permission-denied" || errorMessage?.includes("permission"))) {
+          console.log(`[Invoice Detail] Permission denied for invoiceId: ${invoiceId}, error code: ${errorCode}`);
         }
         
         // Check for permission denied error
-        if (error.code === "permission-denied" || error.message?.includes("permission") || error.message?.includes("insufficient")) {
+        if (errorCode === "permission-denied" || errorMessage?.includes("permission") || errorMessage?.includes("insufficient")) {
           callback(null, "Permission denied: You don't have access to this invoice (or it no longer exists).");
         } else {
-          callback(null, error.message || "Failed to load invoice");
+          callback(null, errorMessage || "Failed to load invoice");
         }
       }
     );
 
     return unsubscribe;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error setting up invoice subscription:", error);
-    callback(null, error.message || "Failed to set up invoice subscription");
+    const errorMessage = error instanceof Error ? error.message : "Failed to set up invoice subscription";
+    callback(null, errorMessage);
     return () => {};
   }
 }
@@ -501,7 +514,7 @@ export async function updateInvoice(
 
   const invoiceRef = doc(db, "invoices", invoiceId);
 
-  const updateData: any = {
+  const updateData: Record<string, unknown> = {
     updatedAt: serverTimestamp(),
   };
 
@@ -532,7 +545,6 @@ export async function updateInvoice(
 
   // If enabling auto-chase and nextChaseAt is not set, set it
   if (updates.autoChaseEnabled && !updateData.nextChaseAt) {
-    const days = updates.autoChaseDays || 3;
     const nextChaseDate = new Date();
     nextChaseDate.setMinutes(nextChaseDate.getMinutes() + 1); // 1 minute from now for first chase
     updateData.nextChaseAt = Timestamp.fromDate(nextChaseDate);
@@ -627,10 +639,10 @@ export async function markInvoicePaid(
     });
 
     // Parse response
-    let data: any;
+    let data: { ok?: boolean; error?: string; message?: string };
     try {
-      data = await response.json();
-    } catch (parseError) {
+      data = await response.json() as { ok?: boolean; error?: string; message?: string };
+    } catch {
       // If JSON parse fails, check status
       if (response.status === 401) {
         const errorMsg = "Authentication failed. Please try logging in again.";
@@ -742,28 +754,32 @@ export function subscribeToChaseEvents(
         });
         callback(events);
       },
-      (error: any) => {
+      (error: unknown) => {
         // Handle permission errors gracefully
-        if (error?.code === "permission-denied" || error?.message?.includes("Missing or insufficient permissions")) {
+        const errorCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : undefined;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorCode === "permission-denied" || errorMessage?.includes("Missing or insufficient permissions")) {
           console.warn("Permission denied for chase events - showing empty list:", error);
           // Return empty array instead of error to prevent page crash
           callback([]);
         } else {
           console.error("Error subscribing to chase events:", error);
-          callback([], error.message || "Failed to load chase events");
+          callback([], errorMessage || "Failed to load chase events");
         }
       }
     );
 
     return unsubscribe;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error setting up chase events subscription:", error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : undefined;
     // Handle permission errors gracefully
-    if (error?.code === "permission-denied" || error?.message?.includes("Missing or insufficient permissions")) {
+    if (errCode === "permission-denied" || errMsg?.includes("Missing or insufficient permissions")) {
       console.warn("Permission denied for chase events - showing empty list");
       callback([]);
     } else {
-      callback([], error.message || "Failed to set up chase events subscription");
+      callback([], errMsg || "Failed to set up chase events subscription");
     }
     return () => {};
   }

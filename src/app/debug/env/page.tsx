@@ -11,7 +11,8 @@ export default function EnvDebugPage() {
   const devToolsEnabled = typeof window !== "undefined" && process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
 
   useEffect(() => {
-    setMounted(true);
+    const id = setTimeout(() => setMounted(true), 0);
+    return () => clearTimeout(id);
   }, []);
 
   // Only show this page if dev tools are enabled

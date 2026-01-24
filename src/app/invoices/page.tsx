@@ -145,9 +145,10 @@ export default function InvoicesPage() {
         setLastDoc(result.lastDoc);
         setHasMore(result.hasMore || false);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error loading more invoices:", error);
-      showToast(error.message || "Failed to load more invoices", "error");
+      const errorMessage = error instanceof Error ? error.message : "Failed to load more invoices";
+      showToast(errorMessage, "error");
     } finally {
       setLoadingMore(false);
     }

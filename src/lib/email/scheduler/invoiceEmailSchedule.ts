@@ -74,7 +74,7 @@ async function hasEmailBeenSent(
 
   // For late weekly emails, also check weekNumber
   if (type === "invoice_late_weekly" && weekNumber !== undefined) {
-    query = query.where("weekNumber", "==", weekNumber) as any;
+    query = query.where("weekNumber", "==", weekNumber);
   }
 
   const snapshot = await query.limit(1).get();

@@ -14,8 +14,13 @@ export function useEntitlements() {
 
   useEffect(() => {
     // Initial load
-    setIsPro(getIsPro());
-    setLoading(false);
+    const initialPro = getIsPro();
+    setIsPro(initialPro);
+    // Schedule loading state update in next tick to avoid setState in effect warning
+    const timeoutId = setTimeout(() => {
+      setLoading(false);
+    }, 0);
+    return () => clearTimeout(timeoutId);
 
     // Subscribe to changes
     const unsubscribe = subscribe((proStatus) => {

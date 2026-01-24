@@ -9,6 +9,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { sendInvoiceEmail } from "@/lib/email/sendInvoiceEmail";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { isApiError } from "@/lib/api/ApiError";
+import { resolveInvoiceRefAndBusinessId } from "@/lib/invoicePaths";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
@@ -43,21 +44,11 @@ export async function POST(request: NextRequest) {
 
     const db = getAdminFirestore();
 
-    // Fetch invoice
-    const invoiceRef = db.collection("invoices").doc(invoiceId);
-    const invoiceDoc = await invoiceRef.get();
+    const { businessId, exists, data } = await resolveInvoiceRefAndBusinessId(db, invoiceId);
 
-    if (!invoiceDoc.exists) {
+    if (!exists || !data) {
       return NextResponse.json(
         { error: "Invoice not found" },
-        { status: 404 }
-      );
-    }
-
-    const data = invoiceDoc.data();
-    if (!data) {
-      return NextResponse.json(
-        { error: "Invoice data not found" },
         { status: 404 }
       );
     }
@@ -98,13 +89,13 @@ export async function POST(request: NextRequest) {
     await sendInvoiceEmail({
       invoice: {
         id: invoiceId,
-        userId: data.userId || "",
-        customerName: data.customerName || "Customer",
-        customerEmail: data.customerEmail,
-        amount: data.amount || 0,
-        dueAt: data.dueAt instanceof Timestamp ? data.dueAt.toDate() : new Date(data.dueAt),
-        paymentLink: data.paymentLink || null,
-        invoiceNumber: data.invoiceNumber || invoiceId.slice(0, 8),
+        userId: businessId || "",
+        customerName: (data.customerName as string) || "Customer",
+        customerEmail: (data.customerEmail as string) ?? "",
+        amount: (data.amount as number) ?? 0,
+        dueAt: data.dueAt instanceof Timestamp ? data.dueAt.toDate() : new Date(String(data.dueAt ?? "")),
+        paymentLink: (data.paymentLink as string | null) ?? null,
+        invoiceNumber: (data.invoiceNumber as string) || invoiceId.slice(0, 8),
       },
       type: "invoice_due",
     });

@@ -18,7 +18,8 @@ export function Header({ title, children }: HeaderProps) {
 
   useEffect(() => {
     if (!auth) {
-      setLoading(false);
+      // Use requestAnimationFrame to avoid setState in effect warning
+      requestAnimationFrame(() => setLoading(false));
       return;
     }
 

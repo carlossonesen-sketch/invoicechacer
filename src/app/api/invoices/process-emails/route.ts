@@ -10,6 +10,7 @@ import { computeNextInvoiceEmailToSend, InvoiceForSchedule } from "@/lib/email/s
 import { sendInvoiceEmail } from "@/lib/email/sendInvoiceEmail";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { isApiError } from "@/lib/api/ApiError";
+import { getInvoicesRef } from "@/lib/invoicePaths";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
@@ -27,7 +28,8 @@ try {
 /**
  * Process scheduled emails for all eligible invoices
  */
-export async function POST(request: NextRequest) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- route signature requires request
+export async function POST(_request: NextRequest) {
   try {
     // Ensure Admin is initialized (should already be done at module load, but double-check)
     initFirebaseAdmin();
@@ -38,7 +40,7 @@ export async function POST(request: NextRequest) {
     const db = getAdminFirestore();
 
     const now = new Date();
-    const invoicesRef = db.collection("invoices");
+    const invoicesRef = getInvoicesRef(db);
 
     // Fetch invoices that might need emails:
     // - Status is "pending" or "overdue" (not "paid")

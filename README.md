@@ -168,6 +168,75 @@ If you see a "query requires an index" error, you can:
 1. Click the link in the error message to create it in Firebase Console, OR
 2. Deploy the committed `firestore.indexes.json` file with the command above
 
+### Usage Tracking Deploy Checklist
+
+Before usage tracking (stats/summary) is fully functional:
+
+1. **Deploy Cloud Functions:**
+   ```bash
+   cd functions
+   npm install
+   npm run build
+   firebase deploy --only functions:onInvoiceWrite
+   ```
+
+2. **Deploy Firestore rules/indexes (if needed):**
+   ```bash
+   firebase deploy --only firestore:rules,firestore:indexes
+   ```
+
+3. **Confirm stats/summary appears after marking paid:**
+   - Mark an invoice as paid via the Invoice Detail page
+   - Check Firestore Console: `businessProfiles/{userId}/stats/summary` should exist with updated values
+   - Or call `GET /api/stats/summary` to verify the document
+
+4. **Confirm Vercel env vars set:**
+   - Ensure `FIREBASE_SERVICE_ACCOUNT_KEY` is set in Vercel project settings
+   - Required for API routes that read/write stats
+
+### Local Verification
+
+Exact commands to verify invoice create, mark-paid, and stats flow locally.
+
+1. **Start emulators (if used)**  
+   If you use Firestore/Functions emulators:
+   ```bash
+   firebase emulators:start --only firestore,functions
+   ```
+   Omit when using a hosted Firebase project. Stats are updated by the `onInvoiceWrite` Cloud Function (deploy it for hosted; it runs in the emulator when using emulators).
+
+2. **Run web app**
+   ```bash
+   npm run dev
+   ```
+   Open http://localhost:3000 and sign in.
+
+3. **Create invoice**  
+   - **UI:** Go to http://localhost:3000/invoices/new, fill the form, submit. Note the new `invoiceId` from the redirect or list.  
+   - **API:**
+     ```bash
+     curl -s -X POST http://localhost:3000/api/invoices/create -H "Content-Type: application/json" -d '{"userId":"YOUR_UID","customerName":"Test","customerEmail":"test@example.com","amount":10000,"dueAt":"2025-12-31T23:59:59.000Z","status":"pending"}'
+     ```
+     Replace `YOUR_UID` with your Firebase Auth UID. Response includes `invoiceId`.
+
+4. **Mark paid**  
+   - **UI:** Open the invoice at `/invoices/[id]`, click **Mark Paid**.  
+   - **API:**
+     ```bash
+     curl -s -X POST "http://localhost:3000/api/invoices/INVOICE_ID/mark-paid" -H "Content-Type: application/json" -H "Authorization: Bearer YOUR_ID_TOKEN" -d '{}'
+     ```
+     Replace `INVOICE_ID` and `YOUR_ID_TOKEN`. Optional: `-d '{"paidAmountCents":10000}'`. Get `YOUR_ID_TOKEN` after signing in (e.g. from the app in browser devtools or a login script).
+
+5. **Confirm stats changes**  
+   - **API:**
+     ```bash
+     curl -s "http://localhost:3000/api/stats/summary" -H "Authorization: Bearer YOUR_ID_TOKEN"
+     ```
+   - **Firestore `businessProfiles/{userId}/stats/summary`:**  
+     Check: `collectedTotalCents`, `collectedThisMonthCents`, `outstandingTotalCents`, `paidCountTotal`, `paidCountThisMonth`, `pendingCount`, `lastUpdatedAt`.  
+   - **Invoice doc `invoices/{invoiceId}`:**  
+     After mark paid: `paidAt` (Timestamp), `paidMonthKey` (YYYY-MM), `status` (`"paid"`). Optionally `paidAmountCents`.
+
 ### Installation
 
 ```bash

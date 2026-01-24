@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, onSnapshot, Timestamp, serverTimestamp, DocumentData } from "firebase/firestore";
+import { doc, getDoc, setDoc, onSnapshot, Timestamp, serverTimestamp } from "firebase/firestore";
 import { db } from "./firebase";
 
 export interface BusinessProfile {
@@ -78,9 +78,10 @@ export function subscribeBusinessProfile(
     );
 
     return unsubscribe;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error setting up business profile subscription:", error);
-    callback(null, error.message || "Failed to set up business profile subscription");
+    const errorMessage = error instanceof Error ? error.message : "Failed to set up business profile subscription";
+    callback(null, errorMessage);
     return () => {};
   }
 }
@@ -103,7 +104,7 @@ export async function upsertBusinessProfile(
   const profileRef = doc(db, "businessProfiles", uid);
   const existingDoc = await getDoc(profileRef);
 
-  const updateData: any = {
+  const updateData: Record<string, unknown> = {
     companyName: data.companyName,
     companyEmail: data.companyEmail || null,
     phone: data.phone || null,

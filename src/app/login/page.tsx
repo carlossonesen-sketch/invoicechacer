@@ -112,19 +112,21 @@ export default function LoginPage() {
         }
         router.refresh();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Auth error:", err);
-      if (err.code === "auth/user-not-found") {
+      const errorCode = err && typeof err === "object" && "code" in err ? String(err.code) : undefined;
+      if (errorCode === "auth/user-not-found") {
         setError("No account found with this email. Toggle 'Create account' to sign up.");
-      } else if (err.code === "auth/wrong-password") {
+      } else if (errorCode === "auth/wrong-password") {
         setError("Incorrect password");
-      } else if (err.code === "auth/email-already-in-use") {
+      } else if (errorCode === "auth/email-already-in-use") {
         setError("Email already in use. Sign in instead.");
         setIsCreating(false);
-      } else if (err.code === "auth/weak-password") {
+      } else if (errorCode === "auth/weak-password") {
         setError("Password is too weak");
       } else {
-        setError(err.message || "Failed to authenticate. Please try again.");
+        const errorMessage = err instanceof Error ? err.message : "Failed to authenticate. Please try again.";
+        setError(errorMessage);
       }
     } finally {
       setLoading(false);

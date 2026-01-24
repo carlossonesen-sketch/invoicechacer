@@ -3,7 +3,7 @@
  */
 
 import { sendEmailSafe } from "./sendEmailSafe";
-import { renderInvoiceEmail, InvoiceForEmail } from "./templates/invoiceTemplates";
+import { renderInvoiceEmail } from "./templates/invoiceTemplates";
 
 export interface InvoiceForEmailSend {
   id: string;

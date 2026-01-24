@@ -7,7 +7,6 @@ import { useRouter, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { subscribeToUserInvoices, fetchNextPageOfInvoices, markInvoicePaid, FirestoreInvoice, InvoiceSubscriptionResult } from "@/lib/invoices";
-import { QueryDocumentSnapshot } from "firebase/firestore";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -31,8 +30,8 @@ export default function DashboardPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [allInvoices, setAllInvoices] = useState<FirestoreInvoice[]>([]);
   const [checkingProfile, setCheckingProfile] = useState(true);
-  const [authResolved, setAuthResolved] = useState(false);
-  const [profileResolved, setProfileResolved] = useState(false);
+  const [, setAuthResolved] = useState(false);
+  const [, setProfileResolved] = useState(false);
   const pageMountTime = useRef<number>(Date.now());
   const firstRenderTime = useRef<number | null>(null);
   const invoiceUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -127,7 +126,7 @@ export default function DashboardPage() {
         invoiceUnsubscribeRef.current = null;
       }
     };
-  }, [router]);
+  }, [router, pathname]);
 
   // Memoize KPI calculations to avoid recalculation on every render
   const kpis = useMemo(() => {
@@ -163,6 +162,38 @@ export default function DashboardPage() {
   }, [allInvoices]);
 
   const [showPaid, setShowPaid] = useState(false);
+
+  // Payments stats from GET /api/stats/summary (zeros until loaded or on error)
+  const [paymentsStats, setPaymentsStats] = useState({
+    collectedThisMonthCents: 0,
+    collectedTotalCents: 0,
+    outstandingTotalCents: 0,
+    paidCountThisMonth: 0,
+  });
+
+  useEffect(() => {
+    if (!user) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const idToken = await user.getIdToken();
+        const res = await fetch("/api/stats/summary", {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        if (!mounted || !res.ok) return;
+        const d = await res.json();
+        setPaymentsStats({
+          collectedThisMonthCents: typeof d.collectedThisMonthCents === "number" ? d.collectedThisMonthCents : 0,
+          collectedTotalCents: typeof d.collectedTotalCents === "number" ? d.collectedTotalCents : 0,
+          outstandingTotalCents: typeof d.outstandingTotalCents === "number" ? d.outstandingTotalCents : 0,
+          paidCountThisMonth: typeof d.paidCountThisMonth === "number" ? d.paidCountThisMonth : 0,
+        });
+      } catch {
+        // Keep zeros on error (show $0 / 0 without errors)
+      }
+    })();
+    return () => { mounted = false; };
+  }, [user]);
 
   // Memoize recent invoices list (exclude paid by default unless showPaid is enabled)
   const recentInvoices = useMemo(() => {
@@ -364,6 +395,36 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {/* Payments (from GET /api/stats/summary) */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Payments</h3>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <div className="text-sm font-medium text-gray-500">Collected this month</div>
+                <div className="mt-2 text-2xl font-semibold text-gray-900">
+                  {formatCurrency(paymentsStats.collectedThisMonthCents)}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm font-medium text-gray-500">Collected all-time</div>
+                <div className="mt-2 text-2xl font-semibold text-gray-900">
+                  {formatCurrency(paymentsStats.collectedTotalCents)}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm font-medium text-gray-500">Outstanding (pending total)</div>
+                <div className="mt-2 text-2xl font-semibold text-gray-900">
+                  {formatCurrency(paymentsStats.outstandingTotalCents)}
+                </div>
+              </div>
+              <div>
+                <div className="text-sm font-medium text-gray-500">Paid invoices this month</div>
+                <div className="mt-2 text-2xl font-semibold text-gray-900">
+                  {paymentsStats.paidCountThisMonth}
+                </div>
+              </div>
+            </div>
+          </div>
 
           {/* Recently Updated Invoices */}
           <div className="bg-white rounded-lg border border-gray-200">
