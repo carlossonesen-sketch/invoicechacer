@@ -86,10 +86,9 @@ export async function POST(request: NextRequest) {
       const planLimits = getPlanLimits(plan);
 
       if (planLimits.maxPendingInvoices !== Infinity) {
-        // Count pending invoices for this user
-        const pendingInvoicesRef = getInvoicesRef(db);
+        // Count pending invoices for this user (scoped collection)
+        const pendingInvoicesRef = getInvoicesRef(db, userId);
         const pendingSnapshot = await pendingInvoicesRef
-          .where("userId", "==", userId)
           .where("status", "==", "pending")
           .count()
           .get();
@@ -113,8 +112,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Create invoice
-    const invoicesRef = getInvoicesRef(db);
+    // Create invoice in businessProfiles/{userId}/invoices
+    const invoicesRef = getInvoicesRef(db, userId);
     const newInvoice = {
       userId,
       customerName: customerName.trim(),

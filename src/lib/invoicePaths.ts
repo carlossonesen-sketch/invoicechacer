@@ -1,50 +1,51 @@
 /**
  * Canonical invoice collection path and business/tenant resolution.
  *
- * Final path pattern: invoices/{invoiceId}
- * - Collection: invoices (root). Doc: invoices/{invoiceId}.
- * - Tenant: userId on document; businessId === userId.
- * - Stats: businessProfiles/{businessId}/stats/summary (updated by onInvoiceWrite).
+ * Path pattern: businessProfiles/{uid}/invoices/{invoiceId}
+ * - Collection: businessProfiles/{uid}/invoices. Doc: businessProfiles/{uid}/invoices/{invoiceId}.
+ * - Tenant: uid (parent of subcollection); businessId === uid.
+ * - Stats: businessProfiles/{uid}/stats/summary (updated by onInvoiceWrite).
  */
 
 import type { DocumentReference, Firestore } from "firebase-admin/firestore";
 
-export const INVOICE_COLLECTION_ID = "invoices";
+/** Subcollection name under businessProfiles/{uid} */
+export const INVOICE_SUBCOLLECTION_ID = "invoices";
 
 /**
  * Returns a reference to the invoice document.
- * Path: invoices/{invoiceId}
+ * Path: businessProfiles/{uid}/invoices/{invoiceId}
  */
-export function getInvoiceRef(db: Firestore, invoiceId: string): DocumentReference {
-  return db.collection(INVOICE_COLLECTION_ID).doc(invoiceId);
+export function getInvoiceRef(db: Firestore, uid: string, invoiceId: string): DocumentReference {
+  return db.collection("businessProfiles").doc(uid).collection(INVOICE_SUBCOLLECTION_ID).doc(invoiceId);
 }
 
 /**
- * Returns a reference to the invoices collection (for queries and add).
- * Path: invoices
+ * Returns a reference to the invoices subcollection for a user.
+ * Path: businessProfiles/{uid}/invoices
  */
-export function getInvoicesRef(db: Firestore) {
-  return db.collection(INVOICE_COLLECTION_ID);
+export function getInvoicesRef(db: Firestore, uid: string) {
+  return db.collection("businessProfiles").doc(uid).collection(INVOICE_SUBCOLLECTION_ID);
 }
 
 export interface ResolvedInvoiceRef {
-  businessId: string | null;
+  businessId: string;
   invoiceRef: DocumentReference;
   exists: boolean;
   data: Record<string, unknown> | null;
 }
 
 /**
- * Load invoice by id and resolve businessId (userId from document).
- * Returns { businessId, invoiceRef, exists, data }.
+ * Load invoice by id in the scoped path and resolve businessId (= uid).
+ * Returns { businessId: uid, invoiceRef, exists, data }.
  */
 export async function resolveInvoiceRefAndBusinessId(
   db: Firestore,
-  invoiceId: string
+  invoiceId: string,
+  uid: string
 ): Promise<ResolvedInvoiceRef> {
-  const invoiceRef = getInvoiceRef(db, invoiceId);
+  const invoiceRef = getInvoiceRef(db, uid, invoiceId);
   const snap = await invoiceRef.get();
   const data = snap.exists ? (snap.data() ?? null) : null;
-  const businessId = (data?.userId as string | undefined) ?? null;
-  return { businessId, invoiceRef, exists: snap.exists, data };
+  return { businessId: uid, invoiceRef, exists: snap.exists, data };
 }

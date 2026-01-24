@@ -16,7 +16,15 @@ service cloud.firestore {
       return signedIn() && request.resource.data.userId == request.auth.uid;
     }
 
-    // Invoices live at /invoices/{invoiceId}
+    // Invoices: canonical path businessProfiles/{uid}/invoices/{invoiceId}
+    match /businessProfiles/{uid}/invoices/{invoiceId} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // /invoices/{invoiceId}: read/list/get if request.auth != null && resource.data.userId == request.auth.uid;
+    // create if request.auth != null && request.resource.data.userId == request.auth.uid;
+    // update, delete if request.auth != null && resource.data.userId == request.auth.uid.
+    // Legacy top-level (for migrate script; remove after migration)
     match /invoices/{invoiceId} {
       allow read: if isOwner();
       allow create: if isOwnerCreate();
@@ -43,14 +51,15 @@ service cloud.firestore {
       allow read, write: if signedIn() && request.auth.uid == uid;
     }
 
-    // Business profiles live at /businessProfiles/{uid}
-    // Users can only read/write their own business profile
+    // businessProfiles/{uid}: read, write if request.auth != null && request.auth.uid == uid
     match /businessProfiles/{uid} {
-      allow read, write: if signedIn() && request.auth.uid == uid;
-      
-      // Stats subcollection for business profiles
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      // businessProfiles/{uid}/stats/{docId}: read if owner; write allowed for owner (client).
+      // Server/Admin SDK bypasses rules for backend writes.
       match /stats/{docId} {
-        allow read, write: if signedIn() && request.auth.uid == uid;
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if request.auth != null && request.auth.uid == uid;
       }
     }
   }

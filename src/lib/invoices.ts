@@ -111,13 +111,17 @@ export function subscribeToUserInvoices(
   }
 
   try {
-    const invoicesRef = collection(db, "invoices");
+    const invoicesRef = collection(db, "businessProfiles", user.uid, "invoices");
     const q = query(
       invoicesRef,
-      where("userId", "==", user.uid),
       orderBy("createdAt", "desc"),
       limit(pageLimit)
     );
+
+    if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+      const queryPath = `businessProfiles/${user?.uid ?? "?"}/invoices`;
+      console.log("[DEV invoices sub] function: subscribeToUserInvoices user?.uid:", user?.uid, "!!user:", !!user, "auth?.currentUser?.uid:", auth?.currentUser?.uid, "queryPath:", queryPath);
+    }
 
     // Use onSnapshot for real-time updates
     const unsubscribe = onSnapshot(
@@ -137,6 +141,12 @@ export function subscribeToUserInvoices(
       },
       (error: unknown) => {
         console.error("Error subscribing to invoices:", error);
+
+        if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+          const errCode = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
+          const errMsg = error instanceof Error ? error.message : String(error);
+          console.log("[DEV invoices sub onSnapshot error] code:", errCode, "message:", errMsg);
+        }
 
         // Check if this is a Firestore index error
         const errorCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : undefined;
@@ -166,6 +176,11 @@ export function subscribeToUserInvoices(
     return unsubscribe;
   } catch (error: unknown) {
     console.error("Error setting up invoice subscription:", error);
+    if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+      const c = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
+      const m = error instanceof Error ? error.message : String(error);
+      console.log("[DEV subscribeToUserInvoices catch] code:", c, "message:", m);
+    }
     const errorMessage = error instanceof Error ? error.message : "Failed to set up invoice subscription";
     callback({
       invoices: [],
@@ -190,11 +205,14 @@ export async function fetchNextPageOfInvoices(
     };
   }
 
+  if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+    console.log("[DEV fetchNextPageOfInvoices] function: fetchNextPageOfInvoices uid:", user.uid);
+  }
+
   try {
-    const invoicesRef = collection(db, "invoices");
+    const invoicesRef = collection(db, "businessProfiles", user.uid, "invoices");
     const q = query(
       invoicesRef,
-      where("userId", "==", user.uid),
       orderBy("createdAt", "desc"),
       startAfter(lastDoc),
       limit(pageLimit)
@@ -212,6 +230,11 @@ export async function fetchNextPageOfInvoices(
     };
   } catch (error: unknown) {
     console.error("Error fetching next page of invoices:", error);
+    if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+      const c = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
+      const m = error instanceof Error ? error.message : String(error);
+      console.log("[DEV fetchNextPageOfInvoices catch] code:", c, "message:", m);
+    }
     return {
       invoices: [],
       error: error instanceof Error ? error.message : "Failed to fetch invoices",
@@ -229,10 +252,9 @@ export async function getUserInvoices(user: User): Promise<InvoiceQueryResult> {
       };
     }
 
-    const invoicesRef = collection(db, "invoices");
+    const invoicesRef = collection(db, "businessProfiles", user.uid, "invoices");
     const q = query(
       invoicesRef,
-      where("userId", "==", user.uid),
       orderBy("createdAt", "desc")
     );
 
@@ -289,7 +311,7 @@ export async function createInvoice(
     throw new Error("Firebase not initialized. Please check your environment variables.");
   }
 
-  const invoicesRef = collection(db, "invoices");
+  const invoicesRef = collection(db, "businessProfiles", user.uid, "invoices");
 
   const newInvoice = {
     userId: user.uid,
@@ -332,7 +354,7 @@ export async function createInvoicesBulk(
     throw new Error("Firebase not initialized. Please check your environment variables.");
   }
 
-  const invoicesRef = collection(db, "invoices");
+  const invoicesRef = collection(db, "businessProfiles", user.uid, "invoices");
   const errors: string[] = [];
   let success = 0;
   let failed = 0;
@@ -444,6 +466,7 @@ function convertDocToInvoice(docData: DocumentData, docId: string, useServerTime
 }
 
 export function subscribeToInvoice(
+  uid: string,
   invoiceId: string,
   callback: (invoice: FirestoreInvoice | null, error?: string) => void
 ): () => void {
@@ -453,7 +476,7 @@ export function subscribeToInvoice(
   }
 
   try {
-    const invoiceRef = doc(db, "invoices", invoiceId);
+    const invoiceRef = doc(db, "businessProfiles", uid, "invoices", invoiceId);
 
     const unsubscribe = onDocSnapshot(
       invoiceRef,
@@ -496,6 +519,7 @@ export function subscribeToInvoice(
 }
 
 export async function updateInvoice(
+  uid: string,
   invoiceId: string,
   updates: {
     customerName?: string;
@@ -512,7 +536,7 @@ export async function updateInvoice(
     throw new Error("Firebase not initialized. Please check your environment variables.");
   }
 
-  const invoiceRef = doc(db, "invoices", invoiceId);
+  const invoiceRef = doc(db, "businessProfiles", uid, "invoices", invoiceId);
 
   const updateData: Record<string, unknown> = {
     updatedAt: serverTimestamp(),
@@ -687,12 +711,12 @@ export async function markInvoicePaid(
   }
 }
 
-export async function triggerChaseNow(invoiceId: string): Promise<void> {
+export async function triggerChaseNow(uid: string, invoiceId: string): Promise<void> {
   if (!db) {
     throw new Error("Firebase not initialized. Please check your environment variables.");
   }
 
-  const invoiceRef = doc(db, "invoices", invoiceId);
+  const invoiceRef = doc(db, "businessProfiles", uid, "invoices", invoiceId);
 
   const updateData = {
     triggerChaseAt: serverTimestamp(),

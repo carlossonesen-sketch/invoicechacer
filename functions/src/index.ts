@@ -65,21 +65,18 @@ async function updateStatsSummary(
  * Handle invoice write (create, update, delete)
  * Updates stats/summary using atomic increments
  *
- * Path pattern: invoices/{invoiceId}. businessId === userId on document.
- * Stats: businessProfiles/{businessId}/stats/summary
+ * Path pattern: businessProfiles/{uid}/invoices/{invoiceId}.
+ * Stats: businessProfiles/{uid}/stats/summary
  */
 export const onInvoiceWrite = functions.firestore
-  .document("invoices/{invoiceId}")
+  .document("businessProfiles/{uid}/invoices/{invoiceId}")
   .onWrite(async (change, context) => {
-    const invoiceId = context.params.invoiceId;
+    const { uid: userId, invoiceId } = context.params;
     const before = change.before;
     const after = change.after;
 
     const beforeData = before.exists ? before.data() : null;
     const afterData = after.exists ? after.data() : null;
-
-    // Get userId from before or after data
-    const userId = afterData?.userId || beforeData?.userId;
     if (!userId) {
       functions.logger.warn(`[onInvoiceWrite] No userId found for invoice ${invoiceId}`);
       return;

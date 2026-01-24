@@ -18,6 +18,10 @@ export async function getBusinessProfile(uid: string): Promise<BusinessProfile |
     throw new Error("Firebase not initialized. Please check your environment variables.");
   }
 
+  if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+    console.log("[DEV getBusinessProfile] uid:", uid, "docPath:", `businessProfiles/${uid}`);
+  }
+
   const profileRef = doc(db, "businessProfiles", uid);
   const profileSnap = await getDoc(profileRef);
 

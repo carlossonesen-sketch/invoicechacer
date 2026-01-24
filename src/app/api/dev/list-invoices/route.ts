@@ -1,6 +1,6 @@
 /**
  * DEV-ONLY endpoint to list recent invoice IDs for testing
- * Blocked in production
+ * Blocked in production. Requires ?uid= or MIGRATE_UID env.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -12,10 +12,9 @@ import { getInvoicesRef } from "@/lib/invoicePaths";
 export const runtime = "nodejs";
 
 /**
- * List recent invoice IDs (dev only)
+ * List recent invoice IDs (dev only). Scoped to businessProfiles/{uid}/invoices.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- route signature requires request
-export async function GET(_request: NextRequest) {
+export async function GET(request: NextRequest) {
   // Block in production
   if (process.env.NODE_ENV === "production") {
     return NextResponse.json(
@@ -24,12 +23,20 @@ export async function GET(_request: NextRequest) {
     );
   }
 
+  const uid = request.nextUrl.searchParams.get("uid") ?? process.env.MIGRATE_UID ?? "";
+  if (!uid) {
+    return NextResponse.json(
+      { error: "uid required. Use ?uid= or set MIGRATE_UID" },
+      { status: 400 }
+    );
+  }
+
   try {
     // Initialize Firebase Admin
     initFirebaseAdmin();
     const db = getAdminFirestore();
 
-    const invoicesRef = getInvoicesRef(db);
+    const invoicesRef = getInvoicesRef(db, uid);
 
     // Try to order by createdAt if it exists, otherwise just limit
     let query;

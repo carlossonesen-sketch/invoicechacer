@@ -84,7 +84,7 @@ export async function POST(
       );
     }
 
-    const { invoiceRef, businessId, exists, data: invoiceData } = await resolveInvoiceRefAndBusinessId(db, invoiceId);
+    const { invoiceRef, businessId, exists, data: invoiceData } = await resolveInvoiceRefAndBusinessId(db, invoiceId, userId);
 
     if (!exists || !invoiceData) {
       return NextResponse.json(
@@ -93,7 +93,7 @@ export async function POST(
       );
     }
 
-    // Verify invoice belongs to user (businessId === userId)
+    // Verify invoice belongs to user (businessId === uid === userId)
     if (businessId !== userId) {
       return NextResponse.json(
         { error: "FORBIDDEN", message: "Invoice does not belong to you" },

@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:stats": "tsx scripts/test-stats-with-token.ts",
+    "migrate:invoices": "tsx scripts/migrate-invoices-to-scoped.ts"
   },
   "dependencies": {
     "@types/papaparse": "^5.5.2",
@@ -19,6 +21,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "tsx": "^4.19.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

@@ -10,7 +10,6 @@ import { computeNextInvoiceEmailToSend, InvoiceForSchedule } from "@/lib/email/s
 import { sendInvoiceEmail } from "@/lib/email/sendInvoiceEmail";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { isApiError } from "@/lib/api/ApiError";
-import { getInvoicesRef } from "@/lib/invoicePaths";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
@@ -40,27 +39,20 @@ export async function POST(_request: NextRequest) {
     const db = getAdminFirestore();
 
     const now = new Date();
-    const invoicesRef = getInvoicesRef(db);
-
-    // Fetch invoices that might need emails:
-    // - Status is "pending" or "overdue" (not "paid")
-    // - Has customerEmail
-    // - Has dueAt
-    // - dueAt is within reasonable range (past 60 days to future 30 days)
-    // Note: This query requires a composite index on (status, dueAt)
-    // Deploy indexes with: firebase deploy --only firestore:indexes
+    // Query all businessProfiles/{uid}/invoices via collectionGroup
+    // Requires composite index: collectionGroup "invoices", (status Ascending, dueAt Ascending)
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - 60);
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + 30);
 
-    const query = invoicesRef
+    const snapshot = await db
+      .collectionGroup("invoices")
       .where("status", "in", ["pending", "overdue"])
       .where("dueAt", ">=", Timestamp.fromDate(cutoffDate))
       .where("dueAt", "<=", Timestamp.fromDate(futureDate))
-      .limit(100); // Process in batches
-
-    const snapshot = await query.get();
+      .limit(100)
+      .get();
     const results = {
       processed: 0,
       sent: 0,
@@ -86,10 +78,12 @@ export async function POST(_request: NextRequest) {
           continue;
         }
 
+        // uid from path: businessProfiles/{uid}/invoices/{invoiceId}
+        const uid = doc.ref.parent.parent?.id ?? (data.userId as string) ?? "";
         // Convert to schedule format
         const invoice: InvoiceForSchedule = {
           id: doc.id,
-          userId: data.userId || "",
+          userId: uid,
           customerEmail: data.customerEmail,
           dueAt: data.dueAt instanceof Timestamp ? data.dueAt : Timestamp.fromDate(new Date(data.dueAt)),
           status: data.status || "pending",

@@ -25,12 +25,12 @@ export default function DashboardPage() {
   const pathname = usePathname();
   const { isPro } = useEntitlements();
   const [user, setUser] = useState<User | null>(null);
+  const [authInitialized, setAuthInitialized] = useState(false);
   const [result, setResult] = useState<InvoiceSubscriptionResult>({ invoices: [] });
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [allInvoices, setAllInvoices] = useState<FirestoreInvoice[]>([]);
   const [checkingProfile, setCheckingProfile] = useState(true);
-  const [, setAuthResolved] = useState(false);
   const [, setProfileResolved] = useState(false);
   const pageMountTime = useRef<number>(Date.now());
   const firstRenderTime = useRef<number | null>(null);
@@ -44,7 +44,7 @@ export default function DashboardPage() {
       // Firebase unavailable - don't redirect, let EnvMissing component show
       setLoading(false);
       setCheckingProfile(false);
-      setAuthResolved(true);
+      setAuthInitialized(true);
       setProfileResolved(true);
       return;
     }
@@ -52,10 +52,10 @@ export default function DashboardPage() {
     pageMountTime.current = Date.now();
 
     const authUnsubscribe = onAuthStateChanged(auth!, async (currentUser) => {
-      setAuthResolved(true);
-      
+      setAuthInitialized(true);
+
       if (!currentUser) {
-        // Only redirect after bootstrap is complete
+        setUser(null);
         if (!didRedirectRef.current) {
           didRedirectRef.current = true;
           const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
@@ -67,10 +67,13 @@ export default function DashboardPage() {
         return;
       }
       setUser(currentUser);
-      
-      // Onboarding gate: Check if business profile exists
+
+      // Onboarding gate: Check if business profile exists (only after auth + user.uid)
       // Only enforce on dashboard entry, not globally
       try {
+        if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+          console.log("[DEV dashboard businessProfile] auth uid:", currentUser?.uid, "userIsNull:", !currentUser, "docPath:", `businessProfiles/${currentUser?.uid ?? "?"}`);
+        }
         const profile = await getBusinessProfile(currentUser.uid);
         setProfileResolved(true);
         
@@ -89,6 +92,11 @@ export default function DashboardPage() {
         }
       } catch (profileError) {
         console.error("Failed to check business profile on dashboard:", profileError);
+        if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+          const c = profileError && typeof profileError === "object" && "code" in profileError ? (profileError as { code?: string }).code : undefined;
+          const m = profileError instanceof Error ? profileError.message : String(profileError);
+          console.log("[DEV dashboard businessProfile catch] code:", c, "message:", m);
+        }
         setProfileResolved(true);
         // Continue to dashboard even if profile check fails
       }
@@ -103,6 +111,9 @@ export default function DashboardPage() {
       // Set up real-time subscription with limit
       setLoading(true);
       setAllInvoices([]);
+      if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+        console.log("[DEV dashboard invoices] function: subscribeToUserInvoices uid:", currentUser.uid);
+      }
       invoiceUnsubscribeRef.current = subscribeToUserInvoices(currentUser, (invoiceResult) => {
         setResult(invoiceResult);
         setAllInvoices(invoiceResult.invoices);
@@ -172,10 +183,13 @@ export default function DashboardPage() {
   });
 
   useEffect(() => {
-    if (!user) return;
+    if (!authInitialized || !user?.uid) return;
     let mounted = true;
     (async () => {
       try {
+        if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+          console.log("[DEV dashboard getStatsSummary] function: fetch /api/stats/summary uid:", user.uid);
+        }
         const idToken = await user.getIdToken();
         const res = await fetch("/api/stats/summary", {
           headers: { Authorization: `Bearer ${idToken}` },
@@ -188,12 +202,17 @@ export default function DashboardPage() {
           outstandingTotalCents: typeof d.outstandingTotalCents === "number" ? d.outstandingTotalCents : 0,
           paidCountThisMonth: typeof d.paidCountThisMonth === "number" ? d.paidCountThisMonth : 0,
         });
-      } catch {
+      } catch (statsErr) {
+        if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+          const c = statsErr && typeof statsErr === "object" && "code" in statsErr ? (statsErr as { code?: string }).code : undefined;
+          const m = statsErr instanceof Error ? statsErr.message : String(statsErr);
+          console.log("[DEV dashboard getStatsSummary catch] code:", c, "message:", m);
+        }
         // Keep zeros on error (show $0 / 0 without errors)
       }
     })();
     return () => { mounted = false; };
-  }, [user]);
+  }, [authInitialized, user]);
 
   // Memoize recent invoices list (exclude paid by default unless showPaid is enabled)
   const recentInvoices = useMemo(() => {
@@ -222,6 +241,9 @@ export default function DashboardPage() {
 
     setLoadingMore(true);
     try {
+      if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+        console.log("[DEV dashboard fetchNextPageOfInvoices] function: fetchNextPageOfInvoices uid:", user.uid);
+      }
       const nextPageResult = await fetchNextPageOfInvoices(user, result.lastDoc, 25);
       if (nextPageResult.invoices.length > 0) {
         setAllInvoices((prev) => [...prev, ...nextPageResult.invoices]);
@@ -235,6 +257,11 @@ export default function DashboardPage() {
       }
     } catch (error) {
       console.error("Failed to load more invoices:", error);
+      if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+        const c = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
+        const m = error instanceof Error ? error.message : String(error);
+        console.log("[DEV dashboard fetchNextPageOfInvoices catch] code:", c, "message:", m);
+      }
     } finally {
       setLoadingMore(false);
     }
@@ -284,6 +311,28 @@ export default function DashboardPage() {
       }
     );
   }, [showToast, allInvoices]);
+
+  if (!authInitialized) {
+    return (
+      <AppLayout>
+        <Header title="Dashboard" />
+        <div className="flex-1 overflow-auto p-6">
+          <div className="text-gray-500">Loading...</div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (auth && authInitialized && !user) {
+    return (
+      <AppLayout>
+        <Header title="Dashboard" />
+        <div className="flex-1 overflow-auto p-6">
+          <div className="text-gray-500">Loading...</div>
+        </div>
+      </AppLayout>
+    );
+  }
 
   if (loading || checkingProfile) {
     return (

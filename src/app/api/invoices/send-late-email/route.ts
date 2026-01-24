@@ -9,6 +9,7 @@ import { Timestamp } from "firebase-admin/firestore";
 import { sendInvoiceEmail } from "@/lib/email/sendInvoiceEmail";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { isApiError } from "@/lib/api/ApiError";
+import { getAuthenticatedUserId } from "@/lib/api/auth";
 import { resolveInvoiceRefAndBusinessId } from "@/lib/invoicePaths";
 
 // Force Node.js runtime for Vercel
@@ -56,9 +57,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let userId: string;
+    try {
+      userId = await getAuthenticatedUserId(request);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Authentication required";
+      return NextResponse.json({ error: "UNAUTHORIZED", message: msg }, { status: 401 });
+    }
+
     const db = getAdminFirestore();
 
-    const { businessId, exists, data } = await resolveInvoiceRefAndBusinessId(db, invoiceId);
+    const { businessId, exists, data } = await resolveInvoiceRefAndBusinessId(db, invoiceId, userId);
 
     if (!exists || !data) {
       return NextResponse.json(

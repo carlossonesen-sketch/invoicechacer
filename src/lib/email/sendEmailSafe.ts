@@ -108,7 +108,7 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
   // This prevents emails from being sent to paid or overdue invoices
   const db = getAdminFirestore();
   if (db && invoiceId) {
-    const invoiceRef = getInvoiceRef(db, invoiceId);
+    const invoiceRef = getInvoiceRef(db, userId, invoiceId);
     const invoiceDoc = await invoiceRef.get();
     if (invoiceDoc.exists) {
       const invoiceData = invoiceDoc.data();

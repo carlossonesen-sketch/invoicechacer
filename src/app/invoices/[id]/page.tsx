@@ -99,7 +99,7 @@ export default function InvoiceDetailPage() {
       setLoading(true);
       let chaseEventsUnsubscribe: (() => void) | null = null;
       
-      const invoiceUnsubscribe = subscribeToInvoice(invoiceId, (invoiceData, error) => {
+      const invoiceUnsubscribe = subscribeToInvoice(currentUser.uid, invoiceId, (invoiceData, error) => {
         if (error) {
           console.error("Invoice subscription error:", error);
           setLoading(false);
@@ -215,7 +215,7 @@ export default function InvoiceDetailPage() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!invoice || !validate()) return;
+    if (!invoice || !user || !validate()) return;
 
     setSaving(true);
     setSuccessMessage("");
@@ -231,7 +231,7 @@ export default function InvoiceDetailPage() {
         return;
       }
       
-      await updateInvoice(invoice.id, {
+      await updateInvoice(user.uid, invoice.id, {
         customerName: formData.customerName.trim(),
         customerEmail: formData.customerEmail.trim(),
         amount: amountCents,
@@ -261,14 +261,14 @@ export default function InvoiceDetailPage() {
 
 
   async function handleTriggerChase() {
-    if (!invoice) return;
+    if (!invoice || !user) return;
 
     setSaving(true);
     setSuccessMessage("");
     setErrors({});
 
     try {
-      await triggerChaseNow(invoice.id);
+      await triggerChaseNow(user.uid, invoice.id);
       setSuccessMessage("Chase triggered successfully! The cloud function will process it on its next run.");
       setTimeout(() => setSuccessMessage(""), 5000);
     } catch (error: unknown) {
@@ -281,7 +281,7 @@ export default function InvoiceDetailPage() {
   }
 
   async function handleSendInvoice() {
-    if (!invoice) return;
+    if (!invoice || !user) return;
 
     if (!invoice.customerEmail) {
       showToast("Please add a customer email address first", "error");
@@ -293,10 +293,12 @@ export default function InvoiceDetailPage() {
     setErrors({});
 
     try {
+      const idToken = await user.getIdToken();
       const response = await fetch("/api/invoices/send-initial-email", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
         },
         body: JSON.stringify({ invoiceId: invoice.id }),
       });
