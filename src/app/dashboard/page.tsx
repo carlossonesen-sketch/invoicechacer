@@ -395,13 +395,32 @@ export default function DashboardPage() {
     );
   }
 
+  const hasInvoices = allInvoices.length > 0;
+
   return (
     <AppLayout>
-      <Header title="Dashboard" />
+      <Header title="Dashboard">
+        <Button onClick={() => router.push("/invoices/new")}>
+          Create invoice
+        </Button>
+      </Header>
       <div className="flex-1 overflow-auto p-6">
         <div className="space-y-6">
-          {/* Upgrade Banner */}
-          {!isPro && (
+          {/* Get started: empty state when no invoices */}
+          {!hasInvoices && (
+            <div className="rounded-lg border-2 border-dashed border-blue-200 bg-blue-50/50 p-8 text-center">
+              <p className="text-lg font-semibold text-gray-900 mb-1">Create your first invoice</p>
+              <p className="text-sm text-gray-600 mb-4 max-w-md mx-auto">
+                Add a customer and amount, then send the invoice by email in one click. It only takes a minute.
+              </p>
+              <Button onClick={() => router.push("/invoices/new")} size="lg">
+                Create your first invoice
+              </Button>
+            </div>
+          )}
+
+          {/* Upgrade Banner — hide when 0 invoices to keep focus on first action */}
+          {!isPro && hasInvoices && (
             <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -523,8 +542,8 @@ export default function DashboardPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {recentInvoices.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-4 text-center text-gray-500">
-                        No invoices yet
+                      <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                        {hasInvoices ? "No pending invoices. Enable &quot;Show paid&quot; to see paid ones." : "Create your first invoice above."}
                       </td>
                     </tr>
                   ) : (

@@ -138,7 +138,8 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">Invoice Chaser</h1>
-          <p className="text-sm text-gray-500 mb-6">Sign in to your account</p>
+          <p className="text-sm text-gray-500 mb-1">Sign in to your account</p>
+          <p className="text-xs text-gray-400 mb-6">Get paid faster with gentle, automatic invoice reminders.</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <FormField label="Email" htmlFor="email" required error={error}>
@@ -172,21 +173,15 @@ export default function LoginPage() {
               />
             </FormField>
 
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="createAccount"
-                checked={isCreating}
-                onChange={(e) => {
-                  setIsCreating(e.target.checked);
-                  setError("");
-                }}
+            <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2.5">
+              <button
+                type="button"
+                onClick={() => { setIsCreating(!isCreating); setError(""); }}
                 disabled={loading}
-                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              />
-              <label htmlFor="createAccount" className="ml-2 block text-sm text-gray-700">
-                Create account
-              </label>
+                className="text-sm text-gray-700 hover:text-gray-900"
+              >
+                {isCreating ? "Already have an account? Sign in instead." : "Don't have an account? Create one."}
+              </button>
             </div>
 
             {error && (

@@ -274,6 +274,20 @@ export default function InvoicesPage() {
 
           {/* Invoices Table */}
           <div className="bg-white rounded-lg border border-gray-200">
+            {/* Empty state when truly no invoices */}
+            {!loading && allInvoices.length === 0 && (
+              <div className="p-12 text-center">
+                <p className="text-lg font-semibold text-gray-900 mb-1">No invoices yet</p>
+                <p className="text-sm text-gray-600 mb-6 max-w-sm mx-auto">
+                  Create your first invoice and send it to your customer in minutes.
+                </p>
+                <Button onClick={(e) => { e.preventDefault(); router.push("/invoices/new"); }}>
+                  Create your first invoice
+                </Button>
+              </div>
+            )}
+            {(loading || allInvoices.length > 0) && (
+            <>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -311,7 +325,7 @@ export default function InvoicesPage() {
                   ) : filteredInvoices.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
-                        No invoices found
+                        No invoices match your filters
                       </td>
                     </tr>
                   ) : (
@@ -409,6 +423,8 @@ export default function InvoicesPage() {
                   {loadingMore ? "Loading..." : "Load More"}
                 </Button>
               </div>
+            )}
+            </>
             )}
           </div>
         </div>

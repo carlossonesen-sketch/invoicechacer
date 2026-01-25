@@ -111,9 +111,9 @@ export default function CompanyOnboardingPage() {
         <div className="max-w-2xl mx-auto">
           <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">Welcome to Invoice Chaser!</h2>
-              <p className="text-sm text-gray-600">
-                Let&apos;s set up your company profile to get started.
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">Welcome to Invoice Chaser</h2>
+              <p className="text-sm text-gray-600 mb-1">
+                Set up your company profile. Next you&apos;ll create an invoice and send it to your customer in one click.
               </p>
             </div>
 
@@ -155,9 +155,17 @@ export default function CompanyOnboardingPage() {
                 </div>
               )}
 
-              <div className="flex gap-4">
+              <div className="flex flex-col sm:flex-row gap-3">
                 <Button type="submit" disabled={saving} className="flex-1">
-                  {saving ? "Saving..." : "Continue to Dashboard"}
+                  {saving ? "Saving..." : "Continue"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => router.push("/invoices/new")}
+                  disabled={saving}
+                >
+                  Skip to create invoice
                 </Button>
               </div>
             </form>

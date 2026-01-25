@@ -475,7 +475,13 @@ export default function InvoiceDetailPage() {
                   </div>
                 </div>
               </div>
-              <div className="flex gap-2 ml-4">
+              <div className="flex flex-col items-end gap-2 ml-4">
+                {!isEditing && invoice.status !== "paid" && chaseEvents.length === 0 && invoice.customerEmail && (
+                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5">
+                    Your customer hasn&apos;t received this yet. Send it now to get paid faster.
+                  </p>
+                )}
+                <div className="flex gap-2">
                 {!isEditing && invoice.status !== "paid" && (
                   <Button 
                     onClick={handleSendInvoice}
@@ -505,6 +511,7 @@ export default function InvoiceDetailPage() {
                     </Button>
                   </>
                 )}
+                </div>
               </div>
             </div>
           </div>

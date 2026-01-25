@@ -154,7 +154,7 @@ export default function NewInvoicePage() {
 
       // Store invoice ID and reset form for "Add another" flow
       setCreatedInvoiceId(invoiceId);
-      setSuccessMessage("Invoice created successfully!");
+      setSuccessMessage("Invoice created! Send it to your customer to get paid faster.");
       
       // Reset form to allow adding another invoice
       setFormData({
@@ -352,40 +352,33 @@ export default function NewInvoicePage() {
 
           {successMessage && (
             <div className="bg-green-50 border border-green-200 rounded-md p-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <p className="text-sm text-green-800 font-medium">{successMessage}</p>
                 {createdInvoiceId && (
-                  <div className="flex gap-2 ml-4">
+                  <div className="flex gap-2 flex-shrink-0">
                     <Button
                       type="button"
-                      variant="secondary"
                       size="sm"
-                      onClick={() => {
-                        router.push(`/invoices/${createdInvoiceId}`);
-                      }}
+                      onClick={() => router.push(`/invoices/${createdInvoiceId}`)}
                     >
-                      View Invoice
+                      Send to customer
                     </Button>
                     <Button
                       type="button"
                       variant="secondary"
                       size="sm"
                       onClick={() => {
-                        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+                        setSuccessMessage("");
+                        setCreatedInvoiceId(null);
                         if (pathname !== "/invoices/new") {
-                          if (devToolsEnabled) {
-                            console.log("[NAV DEBUG] router.replace('/invoices/new')", { currentPathname: pathname, targetPathname: "/invoices/new", condition: "Add Another button click" });
-                          }
                           router.replace("/invoices/new");
                           router.refresh();
                         } else {
-                          setSuccessMessage("");
-                          setCreatedInvoiceId(null);
                           router.refresh();
                         }
                       }}
                     >
-                      Add Another
+                      Add another
                     </Button>
                   </div>
                 )}
