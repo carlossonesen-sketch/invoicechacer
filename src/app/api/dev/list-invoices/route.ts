@@ -1,21 +1,21 @@
 /**
  * DEV-ONLY endpoint to list recent invoice IDs for testing
- * Blocked in production. Requires ?uid= or MIGRATE_UID env.
+ * Blocked in production. Uses authenticated user's uid only (no client-provided userId).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { getInvoicesRef } from "@/lib/invoicePaths";
+import { getAuthenticatedUserId } from "@/lib/api/auth";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
 
 /**
- * List recent invoice IDs (dev only). Scoped to businessProfiles/{uid}/invoices.
+ * List recent invoice IDs (dev only). Scoped to the authenticated user's businessProfiles/{uid}/invoices.
  */
 export async function GET(request: NextRequest) {
-  // Block in production
   if (process.env.NODE_ENV === "production") {
     return NextResponse.json(
       { error: "This endpoint is only available in development" },
@@ -23,17 +23,18 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const uid = request.nextUrl.searchParams.get("uid") ?? process.env.MIGRATE_UID ?? "";
-  if (!uid) {
+  let uid: string;
+  try {
+    initFirebaseAdmin();
+    uid = await getAuthenticatedUserId(request);
+  } catch {
     return NextResponse.json(
-      { error: "uid required. Use ?uid= or set MIGRATE_UID" },
-      { status: 400 }
+      { error: "UNAUTHORIZED", message: "Authentication required. Use Bearer token or session cookie." },
+      { status: 401 }
     );
   }
 
   try {
-    // Initialize Firebase Admin
-    initFirebaseAdmin();
     const db = getAdminFirestore();
 
     const invoicesRef = getInvoicesRef(db, uid);

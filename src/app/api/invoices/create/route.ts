@@ -7,8 +7,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { getPlanForUser, getPlanLimits } from "@/lib/billing/plan";
+import { getAuthenticatedUserId } from "@/lib/api/auth";
+import { getRequestId } from "@/lib/api/requestId";
 import { mapErrorToHttp } from "@/lib/api/httpError";
-import { isApiError } from "@/lib/api/ApiError";
+import { ApiError, isApiError } from "@/lib/api/ApiError";
 import { getInvoicesRef } from "@/lib/invoicePaths";
 
 // Force Node.js runtime for Vercel
@@ -27,8 +29,8 @@ try {
 /**
  * Create a new invoice
  * POST /api/invoices/create
+ * Auth: Bearer token or session cookie. userId is taken only from getAuthenticatedUserId (never from body).
  * Body: {
- *   userId: string;
  *   customerName: string;
  *   customerEmail: string;
  *   amount: number; // in cents
@@ -42,20 +44,23 @@ try {
  * }
  */
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request);
   try {
-    // Ensure Admin is initialized
     initFirebaseAdmin();
 
+    // User identity from auth only; never use body.userId
+    let userId: string;
+    try {
+      userId = await getAuthenticatedUserId(request);
+    } catch (authError) {
+      const msg = authError instanceof Error ? authError.message : "Authentication required";
+      return NextResponse.json({ error: "UNAUTHORIZED", message: msg }, { status: 401 });
+    }
+
     const body = await request.json();
-    const { userId, customerName, customerEmail, amount, dueAt, status, notes, paymentLink, autoChaseEnabled, autoChaseDays, maxChases } = body;
+    const { customerName, customerEmail, amount, dueAt, status, notes, paymentLink, autoChaseEnabled, autoChaseDays, maxChases } = body;
 
     // Validate required fields
-    if (!userId || typeof userId !== "string") {
-      return NextResponse.json(
-        { error: "TRIAL_PENDING_LIMIT_REACHED", message: "userId is required" },
-        { status: 400 }
-      );
-    }
 
     if (!customerName || !customerEmail || amount === undefined || !dueAt || !status) {
       return NextResponse.json(
@@ -80,33 +85,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check plan-based limits for pending invoices (trial only)
-    if (status === "pending") {
+    // Enforce maxPendingInvoices for all plans: when the plan has a finite cap (trial: 10)
+    // we count unpaid (pending + overdue) and block; starter/pro/business use Infinity so the block is skipped.
+    if (status === "pending" || status === "overdue") {
       const plan = await getPlanForUser(userId);
       const planLimits = getPlanLimits(plan);
 
       if (planLimits.maxPendingInvoices !== Infinity) {
-        // Count pending invoices for this user (scoped collection)
-        const pendingInvoicesRef = getInvoicesRef(db, userId);
-        const pendingSnapshot = await pendingInvoicesRef
-          .where("status", "==", "pending")
+        const invoicesRef = getInvoicesRef(db, userId);
+        const unpaidSnapshot = await invoicesRef
+          .where("status", "in", ["pending", "overdue"])
           .count()
           .get();
 
-        const pendingCount = pendingSnapshot.data().count;
+        const unpaidCount = unpaidSnapshot.data().count;
 
-        if (pendingCount >= planLimits.maxPendingInvoices) {
-          return NextResponse.json(
-            {
-              error: "TRIAL_PENDING_LIMIT_REACHED",
-              message: `Trial plan allows maximum ${planLimits.maxPendingInvoices} pending invoices. You have ${pendingCount}. Please upgrade to create more invoices.`,
-              details: {
-                currentCount: pendingCount,
-                maxAllowed: planLimits.maxPendingInvoices,
-                plan,
-              },
-            },
-            { status: 403 }
+        if (unpaidCount >= planLimits.maxPendingInvoices) {
+          throw new ApiError(
+            "TRIAL_PENDING_LIMIT_REACHED",
+            `Trial plan allows maximum ${planLimits.maxPendingInvoices} unpaid invoices. You have ${unpaidCount}. Please upgrade to create more invoices.`,
+            403
           );
         }
       }
@@ -143,22 +141,22 @@ export async function POST(request: NextRequest) {
       message: "Invoice created successfully",
     });
   } catch (error) {
-    console.error("[CREATE INVOICE] Error:", error);
-    
-    // Use ApiError status if present, otherwise fall back to mapErrorToHttp
+    console.error("[CREATE INVOICE] Error:", error, "requestId:", requestId);
+
     if (isApiError(error)) {
       const isDev = process.env.NODE_ENV !== "production";
       return NextResponse.json(
         {
           error: error.code,
           message: error.message,
+          requestId,
           ...(isDev && error.stack ? { stack: error.stack } : {}),
         },
         { status: error.status }
       );
     }
-    
+
     const { status, body } = mapErrorToHttp(error);
-    return NextResponse.json(body, { status });
+    return NextResponse.json({ ...body, requestId }, { status });
   }
 }

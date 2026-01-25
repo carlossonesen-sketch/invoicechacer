@@ -1,11 +1,14 @@
 /**
  * Cloud Functions for Invoice Chaser
- * 
+ *
  * onInvoiceWrite: Updates stats/summary when invoices are created/updated/deleted
+ * sendEmail: HTTP endpoint to send one email via Resend (optional; main sending is in Next.js/Vercel)
  */
 
 import * as functions from "firebase-functions";
+import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import { Resend } from "resend";
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -90,8 +93,15 @@ export const onInvoiceWrite = functions.firestore
       const oldStatus = beforeData?.status;
       const oldAmount = beforeData?.amount || beforeData?.amountCents || 0;
       const oldPaidAt = beforeData?.paidAt;
+      const oldCreatedAt = beforeData?.createdAt;
 
       const updates: Record<string, admin.firestore.FieldValue> = {};
+
+      // Decrement created counts
+      updates.createdCountTotal = admin.firestore.FieldValue.increment(-1);
+      if (oldCreatedAt && isCurrentMonth(oldCreatedAt)) {
+        updates.createdCountThisMonth = admin.firestore.FieldValue.increment(-1);
+      }
 
       if (oldStatus === "pending" || oldStatus === "overdue") {
         // Decrement pending count and outstanding amount
@@ -130,8 +140,15 @@ export const onInvoiceWrite = functions.firestore
       const newStatus = afterData?.status;
       const newAmount = afterData?.amount || afterData?.amountCents || 0;
       const newPaidAt = afterData?.paidAt;
+      const newCreatedAt = afterData?.createdAt;
 
       const updates: Record<string, admin.firestore.FieldValue> = {};
+
+      // Increment created counts
+      updates.createdCountTotal = admin.firestore.FieldValue.increment(1);
+      if (newCreatedAt && isCurrentMonth(newCreatedAt)) {
+        updates.createdCountThisMonth = admin.firestore.FieldValue.increment(1);
+      }
 
       if (newStatus === "pending" || newStatus === "overdue") {
         // Increment pending count and outstanding amount
@@ -329,3 +346,73 @@ export const onInvoiceWrite = functions.firestore
       }
     }
   });
+
+/**
+ * HTTP endpoint to send one email via Resend.
+ * Use when moving email sending to Firebase (e.g. from Firestore triggers or scheduler).
+ * Configure RESEND_API_KEY and optionally EMAIL_FUNCTION_SECRET (x-email-secret header).
+ * From address: RESEND_FROM or "Invoice Chaser <onboarding@resend.dev>".
+ */
+export const sendEmail = onRequest(async (req, res) => {
+  // CORS for same-origin or configured origins
+  res.set("Access-Control-Allow-Origin", "*");
+  if (req.method === "OPTIONS") {
+    res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, x-email-secret");
+    res.status(204).end();
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  const secret = process.env.EMAIL_FUNCTION_SECRET;
+  if (secret && req.get("x-email-secret") !== secret) {
+    res.status(401).json({ error: "UNAUTHORIZED" });
+    return;
+  }
+
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  if (!apiKey) {
+    res.status(503).json({ error: "Resend not configured; set RESEND_API_KEY" });
+    return;
+  }
+
+  let body: { to?: string; subject?: string; html?: string; text?: string };
+  try {
+    body = typeof req.body === "object" && req.body ? req.body : JSON.parse(req.body || "{}");
+  } catch {
+    res.status(400).json({ error: "Invalid JSON body" });
+    return;
+  }
+
+  const { to, subject, html, text } = body;
+  if (!to || !subject || typeof to !== "string" || typeof subject !== "string") {
+    res.status(400).json({ error: "to and subject are required" });
+    return;
+  }
+
+  const from = process.env.RESEND_FROM?.trim() || "Invoice Chaser <onboarding@resend.dev>";
+
+  try {
+    const resend = new Resend(apiKey);
+    const { error } = await resend.emails.send({
+      from,
+      to: [to],
+      subject,
+      html: typeof html === "string" ? html : undefined,
+      text: typeof text === "string" ? text : undefined,
+    });
+    if (error) {
+      functions.logger.warn("[sendEmail] Resend error:", error);
+      res.status(502).json({ error: `Resend: ${error.message}` });
+      return;
+    }
+    res.status(200).json({ ok: true });
+  } catch (e) {
+    functions.logger.error("[sendEmail]", e);
+    res.status(500).json({ error: "Failed to send" });
+  }
+});

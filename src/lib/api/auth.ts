@@ -6,7 +6,8 @@ import { NextRequest } from "next/server";
 import { getAdminApp } from "@/lib/firebase-admin";
 import { getAuth } from "firebase-admin/auth";
 
-const DEV_TOOLS = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
+// Only in non-production: avoid PII/secrets in logs and verbose auth errors
+const DEV_TOOLS = process.env.NEXT_PUBLIC_DEV_TOOLS === "1" && process.env.NODE_ENV !== "production";
 
 /**
  * Decode JWT payload (middle segment) without verifying. Returns { aud, iss, sub, exp, iat } or null.

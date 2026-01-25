@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { sendInvoiceEmail } from "@/lib/email/sendInvoiceEmail";
+import { getRequestId } from "@/lib/api/requestId";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { isApiError } from "@/lib/api/ApiError";
 import { getAuthenticatedUserId } from "@/lib/api/auth";
@@ -29,8 +30,8 @@ try {
  * Send initial invoice email
  */
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request);
   try {
-    // Ensure Admin is initialized (should already be done at module load, but double-check)
     initFirebaseAdmin();
 
     const body = await request.json();
@@ -114,22 +115,22 @@ export async function POST(request: NextRequest) {
       message: "Initial invoice email sent",
     });
   } catch (error) {
-    console.error("[SEND INITIAL EMAIL] Error:", error);
-    
-    // Use ApiError status if present, otherwise fall back to mapErrorToHttp
+    console.error("[SEND INITIAL EMAIL] Error:", error, "requestId:", requestId);
+
     if (isApiError(error)) {
       const isDev = process.env.NODE_ENV !== "production";
       return NextResponse.json(
         {
           error: error.code,
           message: error.message,
+          requestId,
           ...(isDev && error.stack ? { stack: error.stack } : {}),
         },
         { status: error.status }
       );
     }
-    
+
     const { status, body } = mapErrorToHttp(error);
-    return NextResponse.json(body, { status });
+    return NextResponse.json({ ...body, requestId }, { status });
   }
 }

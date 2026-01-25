@@ -50,42 +50,18 @@ export function applyTestRedirect(originalEmail: string): { finalEmail: string; 
         redirected: true,
       };
     }
-    // If no redirect email configured, reject the send
-    throw new Error(`Domain not allowed and TEST_REDIRECT_EMAIL not configured: ${extractDomain(originalEmail)}`);
+    const domain = extractDomain(originalEmail);
+    throw new ApiError(
+      "DOMAIN_NOT_ALLOWED",
+      `Domain not allowed and TEST_REDIRECT_EMAIL not configured: ${domain ?? "invalid"}`,
+      403
+    );
   }
   
   return {
     finalEmail: originalEmail,
     redirected: false,
   };
-}
-
-/**
- * Assert that email sending is enabled
- * Throws if EMAIL_SENDING_ENABLED is not true
- * In development (NODE_ENV !== "production"), also allows enabling via NEXT_PUBLIC_DEV_TOOLS=1
- * 
- * NOTE: This function is kept for backward compatibility, but sendEmailSafe now handles
- * EMAIL_SENDING_ENABLED check directly with logging. This function may still be called
- * by other code paths that need to check before attempting to send.
- */
-export function assertEmailSendingAllowed(): void {
-  const config = getEmailConfig();
-  
-  // Allow enabling via dev tools in development mode
-  const devToolsEnabled = process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-  
-  if (!config.emailSendingEnabled && !devToolsEnabled) {
-    throw new ApiError(
-      "EMAIL_SENDING_DISABLED",
-      "EMAIL_SENDING_DISABLED. " +
-      "Set EMAIL_SENDING_ENABLED=true in your .env.local file to enable email sending. " +
-      (process.env.NODE_ENV !== "production" 
-        ? "Alternatively, set NEXT_PUBLIC_DEV_TOOLS=1 to enable in development mode."
-        : ""),
-      403
-    );
-  }
 }
 
 /**

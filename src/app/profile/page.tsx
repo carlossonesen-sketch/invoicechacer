@@ -1,41 +1,71 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { businessProfileRepo } from "@/data/repositories";
-import { BusinessProfile } from "@/domain/types";
+import { useRouter } from "next/navigation";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { getBusinessProfile, upsertBusinessProfile } from "@/lib/businessProfile";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
 import { isValidEmail, isValidUrl } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
+
+interface FormData {
+  companyName: string;
+  email: string;
+  phone: string;
+  logoUrl: string;
+  defaultPaymentLink: string;
+}
 
 export default function BusinessProfilePage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const [formData, setFormData] = useState<BusinessProfile>({
+  const [formData, setFormData] = useState<FormData>({
     companyName: "",
     email: "",
     phone: "",
     logoUrl: "",
     defaultPaymentLink: "",
   });
+  const { showToast, ToastComponent } = useToast();
 
   useEffect(() => {
-    loadProfile();
-  }, []);
+    if (!auth) {
+      setLoading(false);
+      return;
+    }
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        router.replace("/login?redirect=/profile");
+        return;
+      }
+      loadProfile(user.uid);
+    });
+    return () => unsub();
+  }, [router]);
 
-  async function loadProfile() {
+  async function loadProfile(uid: string) {
     try {
       setLoading(true);
-      const profile = await businessProfileRepo.get();
+      const profile = await getBusinessProfile(uid);
       if (profile) {
-        setFormData(profile);
+        setFormData({
+          companyName: profile.companyName || "",
+          email: profile.companyEmail || "",
+          phone: profile.phone || "",
+          logoUrl: profile.logoUrl || "",
+          defaultPaymentLink: profile.defaultPaymentLink || "",
+        });
       }
     } catch (error) {
       console.error("Failed to load business profile:", error);
+      setErrors({ submit: "Failed to load profile." });
     } finally {
       setLoading(false);
     }
@@ -43,25 +73,11 @@ export default function BusinessProfilePage() {
 
   function validate(): boolean {
     const newErrors: Record<string, string> = {};
-
-    if (!formData.companyName.trim()) {
-      newErrors.companyName = "Company name is required";
-    }
-
-    if (!formData.email.trim()) {
-      newErrors.email = "Email is required";
-    } else if (!isValidEmail(formData.email)) {
-      newErrors.email = "Invalid email address";
-    }
-
-    if (formData.logoUrl && !isValidUrl(formData.logoUrl)) {
-      newErrors.logoUrl = "Logo URL must be a valid HTTP/HTTPS URL";
-    }
-
-    if (formData.defaultPaymentLink && !isValidUrl(formData.defaultPaymentLink)) {
-      newErrors.defaultPaymentLink = "Default payment link must be a valid HTTP/HTTPS URL";
-    }
-
+    if (!formData.companyName.trim()) newErrors.companyName = "Company name is required";
+    if (!formData.email.trim()) newErrors.email = "Email is required";
+    else if (!isValidEmail(formData.email)) newErrors.email = "Invalid email address";
+    if (formData.logoUrl && !isValidUrl(formData.logoUrl)) newErrors.logoUrl = "Logo URL must be a valid HTTP/HTTPS URL";
+    if (formData.defaultPaymentLink && !isValidUrl(formData.defaultPaymentLink)) newErrors.defaultPaymentLink = "Default payment link must be a valid HTTP/HTTPS URL";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   }
@@ -69,17 +85,23 @@ export default function BusinessProfilePage() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (!validate()) return;
+    const user = auth?.currentUser;
+    if (!user) {
+      setErrors({ submit: "You must be logged in to save." });
+      return;
+    }
 
     setSaving(true);
+    setErrors({});
     try {
-      await businessProfileRepo.save({
+      await upsertBusinessProfile(user.uid, {
         companyName: formData.companyName.trim(),
-        email: formData.email.trim(),
+        companyEmail: formData.email.trim(),
         phone: formData.phone?.trim() || undefined,
-        logoUrl: formData.logoUrl?.trim() || undefined,
-        defaultPaymentLink: formData.defaultPaymentLink?.trim() || undefined,
+        logoUrl: formData.logoUrl?.trim() ? formData.logoUrl.trim() : null,
+        defaultPaymentLink: formData.defaultPaymentLink?.trim() ? formData.defaultPaymentLink.trim() : null,
       });
-      alert("Business profile saved successfully!");
+      showToast("Business profile saved successfully!", "success");
     } catch (error) {
       console.error("Failed to save business profile:", error);
       setErrors({ submit: "Failed to save business profile. Please try again." });
@@ -130,7 +152,7 @@ export default function BusinessProfilePage() {
               <Input
                 id="phone"
                 type="tel"
-                value={formData.phone || ""}
+                value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                 error={!!errors.phone}
               />
@@ -141,7 +163,7 @@ export default function BusinessProfilePage() {
                 id="logoUrl"
                 type="url"
                 placeholder="https://..."
-                value={formData.logoUrl || ""}
+                value={formData.logoUrl}
                 onChange={(e) => setFormData({ ...formData, logoUrl: e.target.value })}
                 error={!!errors.logoUrl}
               />
@@ -152,7 +174,7 @@ export default function BusinessProfilePage() {
                 id="defaultPaymentLink"
                 type="url"
                 placeholder="https://..."
-                value={formData.defaultPaymentLink || ""}
+                value={formData.defaultPaymentLink}
                 onChange={(e) => setFormData({ ...formData, defaultPaymentLink: e.target.value })}
                 error={!!errors.defaultPaymentLink}
               />
@@ -175,6 +197,7 @@ export default function BusinessProfilePage() {
           </div>
         </form>
       </div>
+      {ToastComponent}
     </AppLayout>
   );
 }

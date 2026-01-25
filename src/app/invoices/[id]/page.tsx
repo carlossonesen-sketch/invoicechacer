@@ -43,6 +43,7 @@ export default function InvoiceDetailPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState<string>("");
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgradeModalMessage, setUpgradeModalMessage] = useState<string | undefined>(undefined);
   const { isPro } = useEntitlements();
   const [user, setUser] = useState<User | null>(null);
   const [isDev, setIsDev] = useState(false);
@@ -175,8 +176,8 @@ export default function InvoiceDetailPage() {
     return () => {
       authUnsubscribe();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoiceId]); // Only depend on invoiceId to avoid re-subscribing
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only depend on invoiceId to avoid re-subscribing
+  }, [invoiceId]);
 
   function validate(): boolean {
     const newErrors: Record<string, string> = {};
@@ -205,6 +206,7 @@ export default function InvoiceDetailPage() {
     }
 
     if (formData.autoChaseEnabled && !isPro) {
+      setUpgradeModalMessage(undefined);
       setShowUpgradeModal(true);
       return false;
     }
@@ -303,13 +305,32 @@ export default function InvoiceDetailPage() {
         body: JSON.stringify({ invoiceId: invoice.id }),
       });
 
-      const data = await response.json();
+      const data = (await response.json().catch(() => ({}))) as { error?: string; message?: string; alreadySent?: boolean };
 
       if (!response.ok) {
         if (data.alreadySent) {
           showToast("Initial invoice email was already sent", "info");
+        } else if (response.status === 401) {
+          router.replace("/login?redirect=" + encodeURIComponent("/invoices/" + invoice.id));
+          showToast("Please log in again", "error");
+        } else if (response.status === 429) {
+          showToast("Too many requests. Please try again later.", "error");
+          setErrors({ submit: "Too many requests. Please try again later." });
+        } else if (response.status === 403) {
+          if (data.error === "INVOICE_NOT_PENDING") {
+            showToast(data.message || "This invoice can't be emailed because it's no longer pending.", "error");
+            setErrors({ submit: data.message || "This invoice can't be emailed because it's no longer pending." });
+          } else if (data.error && data.error.startsWith("TRIAL_")) {
+            setUpgradeModalMessage("You've reached the trial limit for emails. Upgrade to send more.");
+            setShowUpgradeModal(true);
+            showToast(data.message || "You've reached a trial limit. Upgrade to send more emails.", "error");
+            setErrors({ submit: data.message || "Trial limit reached." });
+          } else {
+            showToast(data.message || "Permission denied.", "error");
+            setErrors({ submit: data.message || "Permission denied." });
+          }
         } else {
-          throw new Error(data.error || "Failed to send email");
+          throw new Error(data.message || data.error || "Failed to send email");
         }
       } else {
         showToast("Invoice email sent successfully!", "success");
@@ -604,6 +625,7 @@ export default function InvoiceDetailPage() {
                         disabled={!isPro}
                         onChange={(e) => {
                           if (e.target.checked && !isPro) {
+                            setUpgradeModalMessage(undefined);
                             setShowUpgradeModal(true);
                             return;
                           }
@@ -620,7 +642,10 @@ export default function InvoiceDetailPage() {
                         type="button"
                         variant="secondary"
                         size="sm"
-                        onClick={() => setShowUpgradeModal(true)}
+                        onClick={() => {
+                          setUpgradeModalMessage(undefined);
+                          setShowUpgradeModal(true);
+                        }}
                       >
                         Upgrade
                       </Button>
@@ -895,7 +920,7 @@ export default function InvoiceDetailPage() {
         <UpgradeModal
           isOpen={showUpgradeModal}
           onClose={() => setShowUpgradeModal(false)}
-          message="Auto-chase is a Pro feature. Upgrade now to automatically send reminder emails to your customers."
+          message={upgradeModalMessage ?? "Auto-chase is a Pro feature. Upgrade now to automatically send reminder emails to your customers."}
         />
       </div>
       {ToastComponent}

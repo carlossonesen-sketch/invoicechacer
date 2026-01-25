@@ -4,50 +4,12 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp, Timestamp } from "firebase/firestore";
 import { startTrial } from "@/lib/billing";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const tiers = [
-  {
-    id: "starter",
-    name: "Starter",
-    price: 10,
-    description: "Perfect for solo owners",
-    features: [
-      "50 unpaid invoices",
-      "25 active auto-chases",
-      "500 auto-emails per month",
-    ],
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    price: 25,
-    description: "Best for growing teams",
-    popular: true,
-    features: [
-      "200 unpaid invoices",
-      "100 active auto-chases",
-      "2,000 auto-emails per month",
-    ],
-  },
-  {
-    id: "business",
-    name: "Business",
-    price: 79,
-    description: "For high-volume operations",
-    features: [
-      "Unlimited unpaid invoices",
-      "Unlimited active auto-chases",
-      "10,000 auto-emails per month",
-    ],
-  },
-];
 
 const VALID_PLANS = ["starter", "pro", "business"] as const;
 type ValidPlan = typeof VALID_PLANS[number];
@@ -83,7 +45,7 @@ export default function TrialPage() {
     });
 
     return () => unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run on mount; processPlan reads searchParams from closure
   }, [router]);
 
   const processPlan = async () => {
@@ -112,6 +74,12 @@ export default function TrialPage() {
       }
 
       // Write to Firestore at businessProfiles/{uid}
+      // trialEndsAt is computed client-side as "now + 14 days"; serverTimestamp() could be used
+      // in a Cloud Function to derive trialEndsAt from trialStartedAt for stricter consistency.
+      const trialStart = new Date();
+      const trialEnd = new Date(trialStart);
+      trialEnd.setDate(trialEnd.getDate() + 14); // 14-day trial
+
       try {
         const profileRef = doc(db, "businessProfiles", user.uid);
         await setDoc(
@@ -120,6 +88,7 @@ export default function TrialPage() {
             plan: validPlan,
             trialTier: validPlan,
             trialStartedAt: serverTimestamp(),
+            trialEndsAt: Timestamp.fromDate(trialEnd),
             subscriptionStatus: "trial",
             updatedAt: serverTimestamp(),
           },
@@ -135,15 +104,9 @@ export default function TrialPage() {
 
       // Save to localStorage as cache (after successful Firestore write)
       localStorage.setItem("invoicechaser_selectedPlan", validPlan);
-
-      // Store trial dates in localStorage
-      const trialStart = new Date();
-      const trialEnd = new Date(trialStart);
-      trialEnd.setDate(trialEnd.getDate() + 14); // 14-day trial
       localStorage.setItem("invoicechaser_trialStartedAt", trialStart.toISOString());
       localStorage.setItem("invoicechaser_trialEndsAt", trialEnd.toISOString());
 
-      // Call Firestore-ready stub function (for any additional setup)
       await startTrial(user.uid, validPlan);
 
       // Show success toast

@@ -44,25 +44,62 @@ export interface EmailEvent {
   createdAt: Timestamp;
   weekNumber?: number;
   metadata?: Record<string, unknown>;
+  /** Resend message ID when send succeeded */
+  messageId?: string;
+  /** Error message when send or write failed */
+  error?: string;
 }
 
+const isProd = () => process.env.NODE_ENV === "production";
+
 /**
- * Placeholder email sending function
- * Replace this with your actual email provider (SendGrid, SES, etc.)
+ * Send email via Resend when RESEND_API_KEY is set; otherwise log only.
+ * Uses RESEND_FROM or "Invoice Chaser <onboarding@resend.dev>" for testing.
+ * When using Resend, both html and text are required (multipart for deliverability).
+ * In production, logs avoid PII (no email addresses, userId).
+ * Returns Resend message ID on successful send when available.
  */
-async function fakeEmailSend(params: {
-  to: string;
-  subject: string;
-  html?: string;
-  text?: string;
-}): Promise<void> {
-  // TODO: Replace with actual email provider integration
-  console.log("[EMAIL SEND]", {
-    to: params.to,
-    subject: params.subject,
-    html: params.html ? "[HTML content]" : undefined,
-    text: params.text ? "[Text content]" : undefined,
-  });
+async function sendEmailTransport(
+  params: { to: string; subject: string; html?: string; text?: string },
+  logContext?: { invoiceId: string; type: string }
+): Promise<string | undefined> {
+  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const from = process.env.RESEND_FROM?.trim() || "Invoice Chaser <onboarding@resend.dev>";
+
+  if (apiKey) {
+    if (!params.html || !params.text) {
+      throw new ApiError(
+        "EMAIL_MISSING_HTML_OR_TEXT",
+        "Both html and text parts are required for sending. Check that the template returns both.",
+        500
+      );
+    }
+    const { Resend } = await import("resend");
+    const resend = new Resend(apiKey);
+    const { data, error } = await resend.emails.send({
+      from,
+      to: [params.to],
+      subject: params.subject,
+      html: params.html,
+      text: params.text,
+    });
+    if (error) {
+      throw new ApiError("RESEND_SEND_FAILED", `Resend: ${error.message}`, 502);
+    }
+    return data?.id;
+  }
+
+  if (isProd() && logContext) {
+    console.log("[EMAIL SEND] No RESEND_API_KEY; logging only", logContext);
+  } else {
+    console.log("[EMAIL SEND] No RESEND_API_KEY; logging only", {
+      to: params.to,
+      subject: params.subject,
+      html: params.html ? "[HTML content]" : undefined,
+      text: params.text ? "[Text content]" : undefined,
+    });
+  }
+  return undefined;
 }
 
 /**
@@ -124,13 +161,17 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
 
   // Step 1: Check EMAIL_SENDING_ENABLED - if disabled, log and return early
   if (!config.emailSendingEnabled) {
-    console.log("[EMAIL SENDING DISABLED] Email send blocked by EMAIL_SENDING_ENABLED=false", {
-      invoiceId,
-      recipient: to,
-      type,
-      userId,
-      subject,
-    });
+    if (isProd()) {
+      console.log("[EMAIL SENDING DISABLED] Email send blocked by EMAIL_SENDING_ENABLED=false", { invoiceId, type });
+    } else {
+      console.log("[EMAIL SENDING DISABLED] Email send blocked by EMAIL_SENDING_ENABLED=false", {
+        invoiceId,
+        recipient: to,
+        type,
+        userId,
+        subject,
+      });
+    }
 
     // Write event with dryRun flag to track attempted sends
     const event: EmailEvent = {
@@ -167,15 +208,19 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
   // Step 5: Handle DRY RUN mode (EMAIL_DRY_RUN or AUTOCHASE_DRY_RUN)
   if (config.emailDryRun || config.autoChaseDryRun) {
     const dryRunReason = config.emailDryRun ? "EMAIL_DRY_RUN=true" : "AUTOCHASE_DRY_RUN=true";
-    console.log(`[EMAIL DRY RUN] Email send blocked by ${dryRunReason}`, {
-      invoiceId,
-      recipient: finalEmail,
-      originalRecipient: to,
-      type,
-      userId,
-      subject,
-      redirected,
-    });
+    if (isProd()) {
+      console.log(`[EMAIL DRY RUN] Email send blocked by ${dryRunReason}`, { invoiceId, type });
+    } else {
+      console.log(`[EMAIL DRY RUN] Email send blocked by ${dryRunReason}`, {
+        invoiceId,
+        recipient: finalEmail,
+        originalRecipient: to,
+        type,
+        userId,
+        subject,
+        redirected,
+      });
+    }
 
     // Write event with dryRun flag
     // Note: weekNumber and metadata are optional and may be undefined
@@ -198,34 +243,38 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
   }
 
   // Step 6: Real send (not disabled, not dry run)
-  console.log("[EMAIL SEND] Sending email", {
-    invoiceId,
-    recipient: finalEmail,
-    originalRecipient: to,
-    type,
-    userId,
-    subject,
-    redirected,
-  });
-
-  try {
-    await fakeEmailSend({
-      to: finalEmail,
-      subject,
-      html,
-      text,
-    });
-
-    console.log("[EMAIL SEND] Email sent successfully", {
+  if (isProd()) {
+    console.log("[EMAIL SEND] Sending email", { invoiceId, type });
+  } else {
+    console.log("[EMAIL SEND] Sending email", {
       invoiceId,
       recipient: finalEmail,
+      originalRecipient: to,
       type,
       userId,
+      subject,
+      redirected,
     });
+  }
+
+  try {
+    const messageId = await sendEmailTransport(
+      { to: finalEmail, subject, html, text },
+      { invoiceId, type }
+    );
+
+    if (isProd()) {
+      console.log("[EMAIL SEND] Email sent successfully", { invoiceId, type });
+    } else {
+      console.log("[EMAIL SEND] Email sent successfully", {
+        invoiceId,
+        recipient: finalEmail,
+        type,
+        userId,
+      });
+    }
 
     // Write event for successful send
-    // Note: weekNumber and metadata are optional and may be undefined
-    // writeEmailEvent will strip undefined values before writing to Firestore
     const event: EmailEvent = {
       userId,
       invoiceId,
@@ -237,19 +286,48 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
       createdAt: Timestamp.now(),
       weekNumber: metadata?.weekNumber,
       metadata: metadata ? { ...metadata } : undefined,
+      messageId,
     };
 
     await writeEmailEvent(event);
   } catch (error) {
-    // Log error but don't write event for failed sends
-    console.error("[EMAIL SEND ERROR] Failed to send email", {
-      invoiceId,
-      recipient: finalEmail,
-      type,
-      userId,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
-    // Re-throw ApiError untouched so routes can use its status code
+    const errMsg = error instanceof Error ? error.message : "Unknown error";
+    if (isProd()) {
+      console.error("[EMAIL SEND ERROR] Failed to send email", { invoiceId, type, error: errMsg });
+    } else {
+      console.error("[EMAIL SEND ERROR] Failed to send email", {
+        invoiceId,
+        recipient: finalEmail,
+        type,
+        userId,
+        error: errMsg,
+      });
+    }
+
+    // Write failed-email event for diagnostics (dryRun: true = not a delivered send)
+    try {
+      const failedEvent: EmailEvent = {
+        userId,
+        invoiceId,
+        type,
+        to: finalEmail,
+        originalTo: to,
+        subject,
+        dryRun: true,
+        createdAt: Timestamp.now(),
+        weekNumber: metadata?.weekNumber,
+        metadata: metadata ? { ...metadata } : undefined,
+        error: errMsg,
+      };
+      await writeEmailEvent(failedEvent);
+    } catch (writeErr) {
+      console.error("[EMAIL SEND ERROR] Failed to write failed-email event", {
+        invoiceId,
+        type,
+        writeError: writeErr instanceof Error ? writeErr.message : "Unknown error",
+      });
+    }
+
     if (isApiError(error)) {
       throw error;
     }

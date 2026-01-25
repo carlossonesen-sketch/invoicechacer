@@ -1,6 +1,11 @@
 /**
  * API route to process scheduled invoice emails
- * Call this from a cron job or scheduled function
+ * Call this from a cron job or scheduled function.
+ *
+ * Auth: Requires CRON_SECRET when set. Send x-cron-secret or Authorization: Bearer <CRON_SECRET>.
+ * - If CRON_SECRET is set: request must include a matching header; otherwise 401.
+ * - If CRON_SECRET is not set in production: 503 (cron not configured).
+ * - If CRON_SECRET is not set in development: allowed for local testing.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -8,6 +13,7 @@ import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { computeNextInvoiceEmailToSend, InvoiceForSchedule } from "@/lib/email/scheduler/invoiceEmailSchedule";
 import { sendInvoiceEmail } from "@/lib/email/sendInvoiceEmail";
+import { getRequestId } from "@/lib/api/requestId";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { isApiError } from "@/lib/api/ApiError";
 
@@ -24,21 +30,46 @@ try {
   }
 }
 
+function checkCronSecret(request: NextRequest): NextResponse | null {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!secret) {
+    if (process.env.NODE_ENV === "production") {
+      return NextResponse.json(
+        { error: "CRON_NOT_CONFIGURED", message: "Set CRON_SECRET to enable this endpoint." },
+        { status: 503 }
+      );
+    }
+    return null;
+  }
+  const fromHeader = request.headers.get("x-cron-secret")?.trim();
+  const auth = request.headers.get("authorization");
+  const fromBearer = typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  const raw = fromHeader || fromBearer;
+  if (!raw || raw !== secret) {
+    return NextResponse.json(
+      { error: "UNAUTHORIZED", message: "Invalid or missing cron secret. Send x-cron-secret or Authorization: Bearer <CRON_SECRET>." },
+      { status: 401 }
+    );
+  }
+  return null;
+}
+
 /**
  * Process scheduled emails for all eligible invoices
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- route signature requires request
-export async function POST(_request: NextRequest) {
+export async function POST(request: NextRequest) {
+  const runId = getRequestId(request);
+  const authErr = checkCronSecret(request);
+  if (authErr) return authErr;
+
   try {
-    // Ensure Admin is initialized (should already be done at module load, but double-check)
     initFirebaseAdmin();
-
-    // Optional: Add authentication/authorization here
-    // For now, allow any POST request (you may want to add a secret token check)
-
     const db = getAdminFirestore();
 
     const now = new Date();
+    const rawLimit = parseInt(process.env.PROCESS_EMAILS_BATCH_LIMIT || "50", 10);
+    const batchLimit = Math.min(isNaN(rawLimit) || rawLimit < 1 ? 50 : rawLimit, 100);
+
     // Query all businessProfiles/{uid}/invoices via collectionGroup
     // Requires composite index: collectionGroup "invoices", (status Ascending, dueAt Ascending)
     const cutoffDate = new Date();
@@ -51,7 +82,7 @@ export async function POST(_request: NextRequest) {
       .where("status", "in", ["pending", "overdue"])
       .where("dueAt", ">=", Timestamp.fromDate(cutoffDate))
       .where("dueAt", "<=", Timestamp.fromDate(futureDate))
-      .limit(100)
+      .limit(batchLimit)
       .get();
     const results = {
       processed: 0,
@@ -122,9 +153,9 @@ export async function POST(_request: NextRequest) {
 
         results.sent++;
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : "Unknown error";
+        const errorMsg = error instanceof Error ? error.message : String(error);
         results.errors.push(`Invoice ${doc.id}: ${errorMsg}`);
-        console.error(`[PROCESS EMAILS] Error processing invoice ${doc.id}:`, error);
+        console.error("[PROCESS EMAILS] Error processing invoice", doc.id, errorMsg, "runId:", runId);
       }
     }
 
@@ -133,23 +164,24 @@ export async function POST(_request: NextRequest) {
       ...results,
     });
   } catch (error) {
-    console.error("[PROCESS EMAILS] Fatal error:", error);
-    
-    // Use ApiError status if present, otherwise fall back to mapErrorToHttp
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("[PROCESS EMAILS] Fatal error:", errMsg, "runId:", runId);
+
     if (isApiError(error)) {
       const isDev = process.env.NODE_ENV !== "production";
       return NextResponse.json(
         {
           error: error.code,
           message: error.message,
+          runId,
           ...(isDev && error.stack ? { stack: error.stack } : {}),
         },
         { status: error.status }
       );
     }
-    
+
     const { status, body } = mapErrorToHttp(error);
-    return NextResponse.json(body, { status });
+    return NextResponse.json({ ...body, runId }, { status });
   }
 }
 

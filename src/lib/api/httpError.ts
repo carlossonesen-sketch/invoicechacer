@@ -1,6 +1,11 @@
 /**
  * Map application errors to HTTP status codes and response bodies
  * Provides consistent error handling across API routes
+ *
+ * Standard status codes:
+ * - 401: auth issues (UNAUTHORIZED, invalid/expired token)
+ * - 403: plan or permission limits (TRIAL_*, FORBIDDEN, INVOICE_NOT_PENDING, etc.)
+ * - 429: rate limits (EMAIL_COOLDOWN_ACTIVE, MAX_EMAILS_PER_DAY_*)
  */
 
 export interface HttpErrorResponse {
@@ -14,13 +19,14 @@ export interface HttpErrorResponse {
 
 /**
  * Map an error to HTTP status code and response body
- * 
+ *
  * Error mapping rules:
- * - EMAIL_COOLDOWN_ACTIVE → 429 (Too Many Requests)
- * - MAX_EMAILS_PER_DAY_* → 429 (Too Many Requests)
- * - TRIAL_* → 403 (Forbidden)
- * - Validation/idempotency errors → 400 (Bad Request)
- * - Default → 500 (Internal Server Error)
+ * - 401 (auth): UNAUTHORIZED
+ * - 403 (plan/permission): TRIAL_*, FORBIDDEN, INVOICE_NOT_PENDING, EMAIL_SENDING_DISABLED, AUTOCHASE_DISABLED
+ * - 429 (rate limit): EMAIL_COOLDOWN_ACTIVE, MAX_EMAILS_PER_DAY_*
+ * - 404: not found
+ * - 400: validation / idempotency
+ * - 500: default
  */
 export function mapErrorToHttp(error: unknown): HttpErrorResponse {
   const isDev = process.env.NODE_ENV !== "production";
@@ -51,13 +57,20 @@ export function mapErrorToHttp(error: unknown): HttpErrorResponse {
     status = 403;
     errorKey = errorCode;
   }
-  // Email sending disabled → 403
+  // Plan/permission limits (non‑TRIAL) → 403
   else if (
     errorCode === "EMAIL_SENDING_DISABLED" ||
-    errorCode === "AUTOCHASE_DISABLED"
+    errorCode === "AUTOCHASE_DISABLED" ||
+    errorCode === "INVOICE_NOT_PENDING" ||
+    errorCode === "FORBIDDEN"
   ) {
     status = 403;
     errorKey = errorCode;
+  }
+  // Auth errors → 401
+  else if (errorCode === "UNAUTHORIZED" || errorMessage.includes("UNAUTHORIZED")) {
+    status = 401;
+    errorKey = "UNAUTHORIZED";
   }
   // Not found errors → 404 (check before validation to catch "Invoice not found")
   else if (

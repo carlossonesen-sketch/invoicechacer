@@ -6,6 +6,8 @@ export interface BusinessProfile {
   companyName: string;
   companyEmail?: string;
   phone?: string;
+  logoUrl?: string;
+  defaultPaymentLink?: string;
   createdAt: Timestamp | string;
   updatedAt: Timestamp | string;
 }
@@ -35,6 +37,8 @@ export async function getBusinessProfile(uid: string): Promise<BusinessProfile |
     companyName: data.companyName || "",
     companyEmail: data.companyEmail,
     phone: data.phone,
+    logoUrl: data.logoUrl,
+    defaultPaymentLink: data.defaultPaymentLink,
     createdAt: data.createdAt || serverTimestamp(),
     updatedAt: data.updatedAt || serverTimestamp(),
   } as BusinessProfile;
@@ -69,6 +73,8 @@ export function subscribeBusinessProfile(
           companyName: data.companyName || "",
           companyEmail: data.companyEmail,
           phone: data.phone,
+          logoUrl: data.logoUrl,
+          defaultPaymentLink: data.defaultPaymentLink,
           createdAt: data.createdAt || serverTimestamp(),
           updatedAt: data.updatedAt || serverTimestamp(),
         };
@@ -99,6 +105,8 @@ export async function upsertBusinessProfile(
     companyName: string;
     companyEmail?: string;
     phone?: string;
+    logoUrl?: string | null;
+    defaultPaymentLink?: string | null;
   }
 ): Promise<void> {
   if (!db) {
@@ -112,6 +120,8 @@ export async function upsertBusinessProfile(
     companyName: data.companyName,
     companyEmail: data.companyEmail || null,
     phone: data.phone || null,
+    logoUrl: data.logoUrl !== undefined ? (data.logoUrl?.trim() || null) : undefined,
+    defaultPaymentLink: data.defaultPaymentLink !== undefined ? (data.defaultPaymentLink?.trim() || null) : undefined,
     updatedAt: serverTimestamp(),
   };
 
@@ -119,6 +129,10 @@ export async function upsertBusinessProfile(
   if (!existingDoc.exists()) {
     updateData.createdAt = serverTimestamp();
   }
+
+  // Omit undefined so Firestore does not receive undefined
+  if (updateData.logoUrl === undefined) delete updateData.logoUrl;
+  if (updateData.defaultPaymentLink === undefined) delete updateData.defaultPaymentLink;
 
   await setDoc(profileRef, updateData, { merge: true });
 }

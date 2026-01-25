@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { Header } from "@/components/layout/header";
@@ -61,24 +61,34 @@ export default function BillingPage() {
   const router = useRouter();
   const { isPro, loading } = useEntitlements();
   const [isDev, setIsDev] = useState(false);
-  const [, setUpgrading] = useState(false);
   const [planFromFirestore, setPlanFromFirestore] = useState<PlanId | null>(null);
   const [loadingPlan, setLoadingPlan] = useState(true);
-  
-  // Load plan from Firestore
+  const [trialEndsAt, setTrialEndsAt] = useState<Date | null>(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [emailsSentThisMonth, setEmailsSentThisMonth] = useState<number | null>(null);
+
+  // Redirect unauthenticated users to login
+  useEffect(() => {
+    if (user === null && !loadingPlan) {
+      router.replace("/login?redirect=" + encodeURIComponent("/settings/billing"));
+    }
+  }, [user, loadingPlan, router]);
+
+  // Load plan and trial info from Firestore
   useEffect(() => {
     if (!auth || !db) {
       setLoadingPlan(false);
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (!user) {
+    const unsubscribe = onAuthStateChanged(auth, (authUser) => {
+      setUser(authUser ?? null);
+      if (!authUser) {
         setLoadingPlan(false);
         return;
       }
 
-      // Load plan from Firestore
       if (!db) {
         setLoadingPlan(false);
         return;
@@ -86,18 +96,27 @@ export default function BillingPage() {
 
       (async () => {
         try {
-          // Read from Firestore first (source of truth)
-          const profileRef = doc(db, "businessProfiles", user.uid);
+          const profileRef = doc(db, "businessProfiles", authUser.uid);
           const profileSnap = await getDoc(profileRef);
-          
+
           if (profileSnap.exists()) {
             const data = profileSnap.data();
             const plan = data?.plan || data?.trialTier;
             if (plan && (plan === "starter" || plan === "pro" || plan === "business")) {
               setPlanFromFirestore(plan as PlanId);
-              // Update localStorage cache
               localStorage.setItem("invoicechaser_selectedPlan", plan);
             }
+            setSubscriptionStatus(typeof data?.subscriptionStatus === "string" ? data.subscriptionStatus : null);
+            const te = data?.trialEndsAt;
+            let parsed: Date | null = null;
+            if (te?.toDate) {
+              parsed = te.toDate();
+            } else if (te && typeof te.seconds === "number") {
+              parsed = new Date(te.seconds * 1000);
+            } else if (typeof te === "string") {
+              parsed = new Date(te);
+            }
+            setTrialEndsAt(parsed && !isNaN(parsed.getTime()) ? parsed : null);
           }
         } catch (error) {
           console.error("Failed to load plan from Firestore:", error);
@@ -109,6 +128,31 @@ export default function BillingPage() {
 
     return () => unsubscribe();
   }, []);
+
+  // Fetch stats summary for usage (emails sent this month)
+  useEffect(() => {
+    if (!user) {
+      setEmailsSentThisMonth(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch("/api/stats/summary", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (typeof data.emailsSentThisMonth === "number" && !cancelled) {
+          setEmailsSentThisMonth(data.emailsSentThisMonth);
+        }
+      } catch {
+        if (!cancelled) setEmailsSentThisMonth(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
 
   // Determine current plan (Firestore first, then localStorage cache, then legacy)
   const currentPlan = useMemo<PlanId>(() => {
@@ -141,30 +185,15 @@ export default function BillingPage() {
     setIsDev(devToolsEnabled);
   }, []);
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reserved for future upgrade CTA
-  function _handleUpgrade() {
-    const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1" || process.env.NODE_ENV !== "production";
-    
-    if (!devToolsEnabled) {
-      // In production, show "Coming soon / join waitlist" message
-      alert("Real billing integration is coming soon! Please join our waitlist or contact support for early access.");
-      return;
-    }
-
-    // Only allow upgrade in dev mode
-    setUpgrading(true);
-    setTimeout(() => {
-      EntitlementsService.setPro(true);
-      setUpgrading(false);
-    }, 500);
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reserved for future downgrade CTA
-  function _handleDowngrade() {
-    if (!confirm("Are you sure you want to downgrade to Free plan? You'll lose access to Pro features.")) {
-      return;
-    }
-    EntitlementsService.setPro(false);
+  if (!user && !loadingPlan) {
+    return (
+      <AppLayout>
+        <Header title="Billing" />
+        <div className="flex-1 overflow-auto p-6">
+          <div className="text-gray-500">Redirecting to login...</div>
+        </div>
+      </AppLayout>
+    );
   }
 
   if (loading || loadingPlan) {
@@ -233,19 +262,52 @@ export default function BillingPage() {
               </div>
             </div>
             
-            {/* Usage This Month (Placeholder) */}
             <div className="mt-6 pt-6 border-t border-gray-200">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Usage This Month</h3>
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Auto emails sent:</span>
-                  <span className="font-medium text-gray-900">— / {planLimitsData.emailsPerMonth}</span>
+                  <span className="font-medium text-gray-900">
+                    {emailsSentThisMonth !== null ? emailsSentThisMonth : "—"} / {planLimitsData.emailsPerMonth}
+                  </span>
                 </div>
-                {/* TODO: Wire usage from server counters */}
-                <p className="text-xs text-gray-500 mt-2">Usage tracking will be available soon</p>
               </div>
             </div>
           </div>
+
+          {/* Trial — upgrade CTA (only when subscriptionStatus is "trial"; paid users never see this) */}
+          {subscriptionStatus === "trial" && currentPlan !== "free" && (() => {
+            const hasValidEndDate = trialEndsAt != null && !isNaN(trialEndsAt.getTime());
+            const isTrialExpired = hasValidEndDate && trialEndsAt! < new Date();
+            const planLabel = currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1);
+            let heading: string;
+            let body: string;
+            if (hasValidEndDate && isTrialExpired) {
+              heading = "Your trial has ended";
+              body = `Your trial ended on ${trialEndsAt!.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}. Add a payment method to continue using ${planLabel}.`;
+            } else if (hasValidEndDate) {
+              heading = "You're on a free trial";
+              body = `Your trial ends on ${trialEndsAt!.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}. Add a payment method to keep your plan after the trial.`;
+            } else {
+              heading = "You're on a free trial";
+              body = "Add a payment method to continue your plan after the trial.";
+            }
+            const isExpired = hasValidEndDate && isTrialExpired;
+            return (
+              <div className={`rounded-lg border p-6 ${isExpired ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"}`}>
+                <h3 className={`text-lg font-semibold mb-2 ${isExpired ? "text-red-900" : "text-amber-900"}`}>{heading}</h3>
+                <p className={`mb-4 ${isExpired ? "text-red-800" : "text-amber-800"}`}>{body}</p>
+                <div className="flex gap-3">
+                  <Button onClick={() => router.push("/pricing")}>
+                    Add payment method
+                  </Button>
+                  <Button onClick={() => router.push("/pricing")} variant="secondary">
+                    View plans
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Upgrade/Manage Actions */}
           {currentPlan === "free" && (

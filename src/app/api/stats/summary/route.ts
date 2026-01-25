@@ -8,7 +8,8 @@ import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
 import { getAuthenticatedUserId } from "@/lib/api/auth";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { isApiError } from "@/lib/api/ApiError";
-import { Timestamp } from "firebase-admin/firestore";
+import { getRequestId } from "@/lib/api/requestId";
+import { Timestamp, Firestore } from "firebase-admin/firestore";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
@@ -34,17 +35,47 @@ export interface StatsSummary {
   paidCountThisMonth: number;
   pendingCount: number;
   lastUpdatedAt: string | null;
+  createdCountTotal: number;
+  createdCountThisMonth: number;
+  emailsSentThisMonth: number;
 }
 
 /**
  * Get stats summary for authenticated user's business
  */
-export async function GET(request: NextRequest) {
+function getFirstDayOfThisMonth(): Timestamp {
+  const now = new Date();
+  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+  return Timestamp.fromDate(first);
+}
+
+async function countEmailsSentThisMonth(db: Firestore, userId: string): Promise<number> {
+  const first = getFirstDayOfThisMonth();
+  const ref = db.collection("emailEvents");
   try {
-    // Ensure Admin is initialized
+    const snap = await ref
+      .where("userId", "==", userId)
+      .where("dryRun", "==", false)
+      .where("createdAt", ">=", first)
+      .count()
+      .get();
+    return snap.data().count;
+  } catch {
+    const snap = await ref
+      .where("userId", "==", userId)
+      .where("dryRun", "==", false)
+      .where("createdAt", ">=", first)
+      .limit(10000)
+      .get();
+    return snap.size;
+  }
+}
+
+export async function GET(request: NextRequest) {
+  const requestId = getRequestId(request);
+  try {
     initFirebaseAdmin();
 
-    // Authenticate user
     let userId: string;
     try {
       userId = await getAuthenticatedUserId(request);
@@ -56,8 +87,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Resolve businessId/tenant (userId is the businessId in this system).
-    // Invoice path pattern: invoices/{invoiceId}; businessId === userId on document.
     const businessId = userId;
 
     const db = getAdminFirestore();
@@ -68,59 +97,50 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Read stats summary document
-    // Path: businessProfiles/{businessId}/stats/summary
     const statsRef = db
       .collection("businessProfiles")
       .doc(businessId)
       .collection("stats")
       .doc("summary");
-    
-    const statsDoc = await statsRef.get();
 
-    // If document doesn't exist, return zeros with consistent shape
+    const [statsDoc, emailsSentThisMonth] = await Promise.all([
+      statsRef.get(),
+      countEmailsSentThisMonth(db, businessId),
+    ]);
+
+    const defaultStats: StatsSummary = {
+      collectedTotalCents: 0,
+      collectedThisMonthCents: 0,
+      outstandingTotalCents: 0,
+      paidCountTotal: 0,
+      paidCountThisMonth: 0,
+      pendingCount: 0,
+      lastUpdatedAt: null,
+      createdCountTotal: 0,
+      createdCountThisMonth: 0,
+      emailsSentThisMonth: 0,
+    };
+
     if (!statsDoc.exists) {
-      const defaultStats: StatsSummary = {
-        collectedTotalCents: 0,
-        collectedThisMonthCents: 0,
-        outstandingTotalCents: 0,
-        paidCountTotal: 0,
-        paidCountThisMonth: 0,
-        pendingCount: 0,
-        lastUpdatedAt: null,
-      };
-      return NextResponse.json(defaultStats);
+      return NextResponse.json({ ...defaultStats, emailsSentThisMonth });
     }
 
     const statsData = statsDoc.data();
     if (!statsData) {
-      // If doc exists but has no data, return zeros
-      const defaultStats: StatsSummary = {
-        collectedTotalCents: 0,
-        collectedThisMonthCents: 0,
-        outstandingTotalCents: 0,
-        paidCountTotal: 0,
-        paidCountThisMonth: 0,
-        pendingCount: 0,
-        lastUpdatedAt: null,
-      };
-      return NextResponse.json(defaultStats);
+      return NextResponse.json({ ...defaultStats, emailsSentThisMonth });
     }
 
-    // Convert Timestamp to ISO string if present
     let lastUpdatedAt: string | null = null;
     if (statsData.lastUpdatedAt) {
       if (statsData.lastUpdatedAt instanceof Timestamp) {
         lastUpdatedAt = statsData.lastUpdatedAt.toDate().toISOString();
       } else if (statsData.lastUpdatedAt.toDate) {
-        // Handle Firestore Timestamp-like objects
         lastUpdatedAt = statsData.lastUpdatedAt.toDate().toISOString();
       } else if (typeof statsData.lastUpdatedAt === "string") {
         lastUpdatedAt = statsData.lastUpdatedAt;
       }
     }
 
-    // Return stats with consistent shape
     const stats: StatsSummary = {
       collectedTotalCents: typeof statsData.collectedTotalCents === "number" ? statsData.collectedTotalCents : 0,
       collectedThisMonthCents: typeof statsData.collectedThisMonthCents === "number" ? statsData.collectedThisMonthCents : 0,
@@ -129,26 +149,29 @@ export async function GET(request: NextRequest) {
       paidCountThisMonth: typeof statsData.paidCountThisMonth === "number" ? statsData.paidCountThisMonth : 0,
       pendingCount: typeof statsData.pendingCount === "number" ? statsData.pendingCount : 0,
       lastUpdatedAt,
+      createdCountTotal: typeof statsData.createdCountTotal === "number" ? statsData.createdCountTotal : 0,
+      createdCountThisMonth: typeof statsData.createdCountThisMonth === "number" ? statsData.createdCountThisMonth : 0,
+      emailsSentThisMonth,
     };
 
     return NextResponse.json(stats);
   } catch (error) {
-    console.error("[STATS SUMMARY] Error:", error);
-    
-    // Use ApiError status if present, otherwise fall back to mapErrorToHttp
+    console.error("[STATS SUMMARY] Error:", error, "requestId:", requestId);
+
     if (isApiError(error)) {
       const isDev = process.env.NODE_ENV !== "production";
       return NextResponse.json(
         {
           error: error.code,
           message: error.message,
+          requestId,
           ...(isDev && error.stack ? { stack: error.stack } : {}),
         },
         { status: error.status }
       );
     }
-    
+
     const { status, body } = mapErrorToHttp(error);
-    return NextResponse.json(body, { status });
+    return NextResponse.json({ ...body, requestId }, { status });
   }
 }

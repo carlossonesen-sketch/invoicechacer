@@ -73,13 +73,13 @@ export const PLAN_LIMITS: Record<Plan, PlanLimits> = {
 /**
  * Get plan for a user from Firestore
  * Checks businessProfiles/{userId}.plan first, then users/{userId}.plan
- * Defaults to "trial" in dev, "starter" in production
+ * Defaults to "trial" when no plan found or when Admin is not initialized
  */
 export async function getPlanForUser(userId: string): Promise<Plan> {
   const db = getAdminFirestore();
   if (!db) {
-    // Fallback to safe default if admin not initialized
-    return process.env.NODE_ENV === "production" ? "starter" : "trial";
+    // Fallback to trial when Admin not initialized (enforce limits; avoid bypass)
+    return "trial";
   }
 
   try {
@@ -111,12 +111,13 @@ export async function getPlanForUser(userId: string): Promise<Plan> {
       }
     }
 
-    // Default: trial in dev, starter in production
-    return process.env.NODE_ENV === "production" ? "starter" : "trial";
+    // Default: trial when no plan in Firestore (enforce limits in prod and dev)
+    return "trial";
   } catch (error) {
-    console.error(`[PLAN] Error fetching plan for user ${userId}:`, error);
-    // Safe fallback
-    return process.env.NODE_ENV === "production" ? "starter" : "trial";
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error("[PLAN] Error fetching plan:", errMsg);
+    // Safe fallback: trial to enforce limits
+    return "trial";
   }
 }
 

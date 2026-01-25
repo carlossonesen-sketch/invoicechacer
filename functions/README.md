@@ -6,9 +6,7 @@ This directory contains Firebase Cloud Functions for Invoice Chaser.
 
 ### `onInvoiceWrite`
 
-Triggers on any write (create, update, delete) to documents in the `invoices` collection.
-
-**Path:** `invoices/{invoiceId}`
+Triggers on any write (create, update, delete) to `businessProfiles/{uid}/invoices/{invoiceId}`.
 
 **Purpose:** Automatically updates the stats summary document at `businessProfiles/{userId}/stats/summary` using atomic increments.
 
@@ -29,6 +27,20 @@ Triggers on any write (create, update, delete) to documents in the `invoices` co
 - `paidCountThisMonth`: Number of invoices paid in current month
 - `pendingCount`: Number of pending/overdue invoices
 - `lastUpdatedAt`: Server timestamp of last update
+
+### `sendEmail` (HTTP)
+
+POST endpoint to send one email via Resend. Use when moving email to Firebase (e.g. from a Firestore trigger or Scheduler). Main sending remains in Next.js on Vercel via `sendEmailSafe` + Resend.
+
+- **URL:** `https://<region>-<project>.cloudfunctions.net/sendEmail` (or as deployed)
+- **Method:** POST
+- **Headers:** `Content-Type: application/json`; optionally `x-email-secret` if `EMAIL_FUNCTION_SECRET` is set
+- **Body:** `{ "to": "user@example.com", "subject": "...", "html": "...", "text": "..." }`
+
+**Env (set in Firebase / Cloud Console or `.env` for emulator):**
+- `RESEND_API_KEY`: Required. Get from https://resend.com
+- `RESEND_FROM`: From address (default: `Invoice Chaser <onboarding@resend.dev>`)
+- `EMAIL_FUNCTION_SECRET`: If set, requests must include `x-email-secret: <value>`
 
 ## Development
 

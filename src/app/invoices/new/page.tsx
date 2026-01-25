@@ -27,6 +27,7 @@ export default function NewInvoicePage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState<string>("");
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgradeModalMessage, setUpgradeModalMessage] = useState<string | undefined>(undefined);
   const [user, setUser] = useState<User | null>(null);
   const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
   const didRedirectRef = useRef<boolean>(false);
@@ -107,6 +108,7 @@ export default function NewInvoicePage() {
     }
 
     if (formData.autoChaseEnabled && !isPro) {
+      setUpgradeModalMessage(undefined);
       setShowUpgradeModal(true);
       return false;
     }
@@ -170,11 +172,25 @@ export default function NewInvoicePage() {
       setLoading(false);
     } catch (error: unknown) {
       console.error("Failed to create invoice:", error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to create invoice. Please try again.";
-      setErrors({ 
-        submit: errorMessage
-      });
+      const err = error as { message?: string; code?: string; status?: number };
+      const errorMessage = err?.message || "Failed to create invoice. Please try again.";
+      const code = err?.code;
+      const status = err?.status;
       setLoading(false);
+
+      if (status === 401) {
+        router.replace("/login?redirect=" + encodeURIComponent("/invoices/new"));
+        return;
+      }
+      if (status === 429) {
+        setErrors({ submit: "Too many requests. Please try again later." });
+        return;
+      }
+      if (status === 403 && typeof code === "string" && code.startsWith("TRIAL_")) {
+        setUpgradeModalMessage("You've reached the trial limit for pending invoices. Upgrade to create more.");
+        setShowUpgradeModal(true);
+      }
+      setErrors({ submit: errorMessage });
     }
   }
 
@@ -297,7 +313,10 @@ export default function NewInvoicePage() {
                   type="button"
                   variant="secondary"
                   size="sm"
-                  onClick={() => setShowUpgradeModal(true)}
+                  onClick={() => {
+                    setUpgradeModalMessage(undefined);
+                    setShowUpgradeModal(true);
+                  }}
                 >
                   Upgrade
                 </Button>
@@ -398,7 +417,7 @@ export default function NewInvoicePage() {
         <UpgradeModal
           isOpen={showUpgradeModal}
           onClose={() => setShowUpgradeModal(false)}
-          message="Auto-chase is a Pro feature. Upgrade now to automatically send reminder emails to your customers."
+          message={upgradeModalMessage ?? "Auto-chase is a Pro feature. Upgrade now to automatically send reminder emails to your customers."}
         />
       </div>
     </AppLayout>

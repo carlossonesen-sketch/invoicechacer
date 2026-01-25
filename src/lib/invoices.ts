@@ -307,35 +307,42 @@ export async function createInvoice(
     maxChases?: number;
   }
 ): Promise<string> {
-  if (!db) {
-    throw new Error("Firebase not initialized. Please check your environment variables.");
+  const idToken = await user.getIdToken();
+  const res = await fetch("/api/invoices/create", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      customerName: invoiceData.customerName,
+      customerEmail: invoiceData.customerEmail,
+      amount: invoiceData.amount,
+      dueAt: invoiceData.dueAt,
+      status: invoiceData.status,
+      notes: invoiceData.notes || undefined,
+      paymentLink: invoiceData.paymentLink || undefined,
+      autoChaseEnabled: invoiceData.autoChaseEnabled ?? false,
+      autoChaseDays: invoiceData.autoChaseDays ?? null,
+      maxChases: invoiceData.maxChases ?? null,
+    }),
+  });
+
+  /** Typed response: success has invoiceId; error has error + message (e.g. TRIAL_PENDING_LIMIT_REACHED). */
+  const data = (await res.json().catch(() => ({}))) as { invoiceId?: string; error?: string; message?: string };
+
+  if (!res.ok) {
+    const err = new Error(data.message || "Failed to create invoice.") as Error & { code?: string; status?: number };
+    if (data.error) err.code = data.error;
+    err.status = res.status; // 401 auth, 403 plan/permission, 429 rate limit
+    throw err;
   }
 
-  const invoicesRef = collection(db, "businessProfiles", user.uid, "invoices");
+  if (!data.invoiceId || typeof data.invoiceId !== "string") {
+    throw new Error("Invalid response: missing invoiceId");
+  }
 
-  const newInvoice = {
-    userId: user.uid,
-    customerName: invoiceData.customerName,
-    customerEmail: invoiceData.customerEmail,
-    amount: invoiceData.amount,
-    dueAt: Timestamp.fromDate(new Date(invoiceData.dueAt)),
-    status: invoiceData.status,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    notes: invoiceData.notes || null,
-    paymentLink: invoiceData.paymentLink || null,
-    autoChaseEnabled: invoiceData.autoChaseEnabled || false,
-    autoChaseDays: invoiceData.autoChaseDays || null,
-    maxChases: invoiceData.maxChases || null,
-    chaseCount: 0,
-    lastChasedAt: null,
-    nextChaseAt: invoiceData.autoChaseEnabled
-      ? Timestamp.fromDate(new Date(Date.now() + 60000)) // 1 minute from now
-      : null,
-  };
-
-  const docRef = await addDoc(invoicesRef, newInvoice);
-  return docRef.id;
+  return data.invoiceId;
 }
 
 export interface BulkInvoiceInput {
@@ -667,33 +674,42 @@ export async function markInvoicePaid(
     try {
       data = await response.json() as { ok?: boolean; error?: string; message?: string };
     } catch {
-      // If JSON parse fails, check status
+      // If JSON parse fails, still handle standard status codes
       if (response.status === 401) {
-        const errorMsg = "Authentication failed. Please try logging in again.";
-        console.error("[markInvoicePaid] 401 Unauthorized - token may be invalid");
-        onError?.(errorMsg);
+        onError?.("Authentication failed. Please try logging in again.");
+        return false;
+      }
+      if (response.status === 429) {
+        onError?.("Too many requests. Please try again later.");
+        return false;
+      }
+      if (response.status === 403) {
+        onError?.("You don't have permission to update this invoice.");
         return false;
       }
       if (!response.ok) {
-        const errorMsg = "Failed to mark invoice as paid";
-        onError?.(errorMsg);
+        onError?.("Failed to mark invoice as paid");
         return false;
       }
-      // Success but no JSON body
       onSuccess?.();
       return true;
     }
 
     if (!response.ok) {
-      // Handle 401 specifically
       if (response.status === 401) {
         const errorMsg = data.message || data.error || "Authentication failed. Please try logging in again.";
         console.error("[markInvoicePaid] 401 Unauthorized:", errorMsg);
         onError?.(errorMsg);
         return false;
       }
-      
-      // Other errors
+      if (response.status === 429) {
+        onError?.("Too many requests. Please try again later.");
+        return false;
+      }
+      if (response.status === 403) {
+        onError?.(data.message || data.error || "You don't have permission to update this invoice.");
+        return false;
+      }
       const errorMessage = data.message || data.error || "Failed to mark invoice as paid";
       onError?.(errorMessage);
       return false;

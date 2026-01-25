@@ -194,7 +194,11 @@ export default function DashboardPage() {
         const res = await fetch("/api/stats/summary", {
           headers: { Authorization: `Bearer ${idToken}` },
         });
-        if (!mounted || !res.ok) return;
+        if (!mounted) return;
+        if (!res.ok) {
+          if (res.status === 401) router.replace("/login?redirect=" + encodeURIComponent("/dashboard"));
+          return;
+        }
         const d = await res.json();
         setPaymentsStats({
           collectedThisMonthCents: typeof d.collectedThisMonthCents === "number" ? d.collectedThisMonthCents : 0,
@@ -212,7 +216,7 @@ export default function DashboardPage() {
       }
     })();
     return () => { mounted = false; };
-  }, [authInitialized, user]);
+  }, [authInitialized, user, router]);
 
   // Memoize recent invoices list (exclude paid by default unless showPaid is enabled)
   const recentInvoices = useMemo(() => {
