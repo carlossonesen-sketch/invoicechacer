@@ -67,6 +67,10 @@ export default function BillingPage() {
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [emailsSentThisMonth, setEmailsSentThisMonth] = useState<number | null>(null);
+  const [stripeCustomerId, setStripeCustomerId] = useState<string | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
 
   // Redirect unauthenticated users to login
   useEffect(() => {
@@ -107,6 +111,7 @@ export default function BillingPage() {
               localStorage.setItem("invoicechaser_selectedPlan", plan);
             }
             setSubscriptionStatus(typeof data?.subscriptionStatus === "string" ? data.subscriptionStatus : null);
+            setStripeCustomerId(typeof data?.stripeCustomerId === "string" ? data.stripeCustomerId : null);
             const te = data?.trialEndsAt;
             let parsed: Date | null = null;
             if (te?.toDate) {
@@ -233,6 +238,37 @@ export default function BillingPage() {
                   {currentPlan === "free" ? "No charge" : `$${planPrice}/month`}
                 </div>
               </div>
+              {stripeCustomerId && (
+                <Button
+                  variant="secondary"
+                  disabled={portalLoading}
+                  onClick={async () => {
+                    if (!user) return;
+                    setBillingError(null);
+                    setPortalLoading(true);
+                    try {
+                      const token = await user.getIdToken();
+                      const res = await fetch("/api/stripe/create-portal-session", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                        body: "{}",
+                      });
+                      const d = await res.json().catch(() => ({}));
+                      if (d.url) {
+                        window.location.href = d.url;
+                        return;
+                      }
+                      setBillingError(d.error || "Failed to open billing portal");
+                    } catch (e) {
+                      setBillingError(e instanceof Error ? e.message : "Failed to open billing portal");
+                    } finally {
+                      setPortalLoading(false);
+                    }
+                  }}
+                >
+                  {portalLoading ? "Opening…" : "Manage billing"}
+                </Button>
+              )}
             </div>
             
             {/* Plan Limits */}
@@ -273,6 +309,11 @@ export default function BillingPage() {
                 </div>
               </div>
             </div>
+            {billingError && (
+              <div className="mt-4 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800">
+                {billingError}
+              </div>
+            )}
           </div>
 
           {/* Trial — upgrade CTA (only when subscriptionStatus is "trial"; paid users never see this) */}
@@ -298,8 +339,33 @@ export default function BillingPage() {
                 <h3 className={`text-lg font-semibold mb-2 ${isExpired ? "text-red-900" : "text-amber-900"}`}>{heading}</h3>
                 <p className={`mb-4 ${isExpired ? "text-red-800" : "text-amber-800"}`}>{body}</p>
                 <div className="flex gap-3">
-                  <Button onClick={() => router.push("/pricing")}>
-                    Add payment method
+                  <Button
+                    disabled={checkoutLoading}
+                    onClick={async () => {
+                      if (!user) return;
+                      setBillingError(null);
+                      setCheckoutLoading(true);
+                      try {
+                        const token = await user.getIdToken();
+                        const res = await fetch("/api/stripe/create-checkout-session", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                          body: JSON.stringify({ plan: currentPlan }),
+                        });
+                        const d = await res.json().catch(() => ({}));
+                        if (d.url) {
+                          window.location.href = d.url;
+                          return;
+                        }
+                        setBillingError(d.error || "Failed to start checkout");
+                      } catch (e) {
+                        setBillingError(e instanceof Error ? e.message : "Failed to start checkout");
+                      } finally {
+                        setCheckoutLoading(false);
+                      }
+                    }}
+                  >
+                    {checkoutLoading ? "Opening…" : "Add payment method"}
                   </Button>
                   <Button onClick={() => router.push("/pricing")} variant="secondary">
                     View plans
