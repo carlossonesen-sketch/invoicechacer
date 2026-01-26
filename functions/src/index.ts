@@ -398,6 +398,15 @@ export const sendEmail = onRequest(async (req, res) => {
     return;
   }
 
+  const normalizedTo = String(to).trim().toLowerCase();
+  const suppressionRef = admin.firestore().collection("email_suppression").doc(normalizedTo);
+  const suppressionSnap = await suppressionRef.get();
+  if (suppressionSnap.exists) {
+    functions.logger.info("[sendEmail] Suppressed:", normalizedTo);
+    res.status(200).json({ ok: true, suppressed: true });
+    return;
+  }
+
   try {
     const result = await sendEmailSes({
       to,
