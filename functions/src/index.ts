@@ -7,6 +7,7 @@
  */
 
 import * as functions from "firebase-functions";
+import { defineSecret } from "firebase-functions/params";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { onRequest } from "firebase-functions/v2/https";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
@@ -546,14 +547,21 @@ export const sesEventWebhook = onRequest(async (req, res) => {
   res.status(200).end();
 });
 
+const DISABLE_DEV_ENDPOINTS = defineSecret("DISABLE_DEV_ENDPOINTS");
+
 /**
  * DEV ONLY: HTTP endpoint to force-run the chase scheduler on demand.
  * Kill-switch: DISABLE_DEV_ENDPOINTS=true → 404. x-dev-token must match DEV_TEST_TOKEN when set.
  * Uses runChaseSchedulerLogic; do not duplicate logic.
  */
 export const forceRunChaseScheduler = onRequest(
-  { secrets: ["DEV_TEST_TOKEN", "DISABLE_DEV_ENDPOINTS"] },
+  { secrets: [DISABLE_DEV_ENDPOINTS, "DEV_TEST_TOKEN"] },
   async (req, res) => {
+    const disabled = (DISABLE_DEV_ENDPOINTS.value() || "").trim().toLowerCase() === "true";
+    if (disabled) {
+      res.status(404).send("Not found");
+      return;
+    }
     res.set("Access-Control-Allow-Origin", "*");
     if (req.method === "OPTIONS") {
       res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -563,10 +571,6 @@ export const forceRunChaseScheduler = onRequest(
     }
     if (req.method !== "GET" && req.method !== "POST") {
       res.status(405).json({ error: "Method not allowed" });
-      return;
-    }
-    if (process.env.DISABLE_DEV_ENDPOINTS === "true") {
-      res.status(404).end();
       return;
     }
     const devToken = process.env.DEV_TEST_TOKEN;
