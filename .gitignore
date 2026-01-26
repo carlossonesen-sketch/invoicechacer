@@ -55,3 +55,12 @@ serviceAccount*.json
 firebase-adminsdk*.json
 *.pem
 *.key
+
+.vercel
+.env*.local
+
+# firebase admin / service accounts (never commit)
+firebase-adminsdk*.json
+*-firebase-adminsdk-*.json
+*adminsdk*.json
+
