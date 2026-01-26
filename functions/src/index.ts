@@ -414,6 +414,130 @@ export const sendEmail = onRequest(async (req, res) => {
 });
 
 /**
+ * AWS SNS webhook for SES Bounce and Complaint events.
+ * - SubscriptionConfirmation: GETs SubscribeURL to confirm.
+ * - Notification: parses Message (SES event), writes Bounce/Complaint to email_suppression (doc ID = email).
+ * req.body and body.Message may be string or object; parses safely.
+ */
+export const sesEventWebhook = onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).end();
+    return;
+  }
+
+  let body: { Type?: string; SubscribeURL?: string; Message?: string | object };
+  try {
+    const raw = req.body;
+    if (typeof raw === "object" && raw !== null) {
+      body = raw as { Type?: string; SubscribeURL?: string; Message?: string | object };
+    } else {
+      body = JSON.parse(typeof raw === "string" ? raw : "{}") as typeof body;
+    }
+  } catch {
+    res.status(400).json({ error: "Invalid JSON body" });
+    return;
+  }
+
+  const snsType = body?.Type;
+  if (!snsType) {
+    res.status(400).json({ error: "Missing SNS Type" });
+    return;
+  }
+
+  if (snsType === "SubscriptionConfirmation") {
+    const url = typeof body.SubscribeURL === "string" ? body.SubscribeURL.trim() : "";
+    if (url) {
+      try {
+        await fetch(url, { method: "GET" });
+        functions.logger.info("[sesEventWebhook] SubscriptionConfirmation: fetched SubscribeURL");
+      } catch (e) {
+        functions.logger.warn("[sesEventWebhook] SubscriptionConfirmation: fetch failed", e);
+      }
+    }
+    res.status(200).end();
+    return;
+  }
+
+  if (snsType === "Notification") {
+    let ses: { eventType?: string; bounce?: { bouncedRecipients?: { emailAddress?: string }[]; bounceSubType?: string }; complaint?: { complainedRecipients?: { emailAddress?: string }[] }; mail?: { destination?: string[] } };
+    const msg = body.Message;
+    if (typeof msg === "string") {
+      try {
+        ses = JSON.parse(msg) as typeof ses;
+      } catch {
+        ses = {};
+      }
+    } else if (typeof msg === "object" && msg !== null) {
+      ses = msg as typeof ses;
+    } else {
+      ses = {};
+    }
+
+    const db = admin.firestore();
+    const col = db.collection("email_suppression");
+
+    if (ses.eventType === "Bounce" && ses.bounce) {
+      const emails: string[] = [];
+      if (Array.isArray(ses.mail?.destination)) {
+        for (const d of ses.mail.destination) {
+          if (typeof d === "string" && d.trim()) emails.push(d.trim());
+        }
+      }
+      if (emails.length === 0 && Array.isArray(ses.bounce.bouncedRecipients)) {
+        for (const r of ses.bounce.bouncedRecipients) {
+          const e = r?.emailAddress;
+          if (typeof e === "string" && e.trim()) emails.push(e.trim());
+        }
+      }
+      const reason = typeof ses.bounce.bounceSubType === "string" ? ses.bounce.bounceSubType : undefined;
+      for (const email of emails) {
+        if (!email) continue;
+        try {
+          await col.doc(email).set(
+            {
+              type: "bounce",
+              ...(reason && { reason: reason }),
+              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        } catch (e) {
+          functions.logger.warn("[sesEventWebhook] Bounce: failed to write", email, e);
+        }
+      }
+    } else if (ses.eventType === "Complaint" && ses.complaint) {
+      const emails: string[] = [];
+      if (Array.isArray(ses.complaint.complainedRecipients)) {
+        for (const r of ses.complaint.complainedRecipients) {
+          const e = r?.emailAddress;
+          if (typeof e === "string" && e.trim()) emails.push(e.trim());
+        }
+      }
+      for (const email of emails) {
+        if (!email) continue;
+        try {
+          await col.doc(email).set(
+            {
+              type: "complaint",
+              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        } catch (e) {
+          functions.logger.warn("[sesEventWebhook] Complaint: failed to write", email, e);
+        }
+      }
+    }
+
+    res.status(200).end();
+    return;
+  }
+
+  // UnsubscribeConfirmation or other SNS Type
+  res.status(200).end();
+});
+
+/**
  * DEV ONLY: HTTP endpoint to force-run the chase scheduler on demand.
  * Kill-switch: DISABLE_DEV_ENDPOINTS=true → 404. x-dev-token must match DEV_TEST_TOKEN when set.
  * Uses runChaseSchedulerLogic; do not duplicate logic.
