@@ -42,6 +42,12 @@ POST endpoint to send one email via Resend. Use when moving email to Firebase (e
 - `RESEND_FROM`: From address (default: `Invoice Chaser <onboarding@resend.dev>`)
 - `EMAIL_FUNCTION_SECRET`: If set, requests must include `x-email-secret: <value>`
 
+### `runChaseScheduler` (scheduled, every 5 minutes)
+
+Runs every 5 minutes to process invoices eligible to chase (`nextChaseAt <= now`, `autoChaseEnabled`, `status` in `pending`/`overdue`). Sends chase emails via SESv2; uses per-invoice lock (`processingAt`), idempotency (`chaseEvents`, `lastChasedAt`), and writes `chaseEvents` with `messageId`/`error`. Supports `DRY_RUN` / `CHASE_DRY_RUN`.
+
+**Secrets / env:** `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `SES_FROM_EMAIL` (e.g. `no-reply@invoicechaser.online`). Optional: `DRY_RUN`/`CHASE_DRY_RUN=true`, `CHASE_BATCH_LIMIT` (default 50).
+
 ## Development
 
 ### Prerequisites

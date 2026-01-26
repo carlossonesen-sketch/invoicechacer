@@ -2,6 +2,16 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function middleware(request: NextRequest) {
+  // Kill-switch: 404 all /api/dev when DISABLE_DEV_ENDPOINTS=true (dev routes keep their own dev-token checks)
+  if (request.nextUrl.pathname.startsWith("/api/dev") && process.env.DISABLE_DEV_ENDPOINTS === "true") {
+    return new NextResponse(null, { status: 404 });
+  }
+
+  // Allow API routes to pass through (they handle auth internally)
+  if (request.nextUrl.pathname.startsWith("/api")) {
+    return NextResponse.next();
+  }
+
   // Check for session cookie (new Firebase auth) or legacy auth cookie (for migration)
   const sessionCookie = request.cookies.get("invoicechaser_session");
   const legacyCookie = request.cookies.get("invoicechaser_auth");
@@ -42,5 +52,8 @@ export const config = {
      * - public files (images, etc.)
      */
     "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // /api/dev/*: run middleware for dev kill-switch (DISABLE_DEV_ENDPOINTS)
+    "/api/dev",
+    "/api/dev/:path*",
   ],
 };
