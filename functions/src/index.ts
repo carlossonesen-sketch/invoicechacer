@@ -2,16 +2,25 @@
  * Cloud Functions for Invoice Chaser
  *
  * onInvoiceWrite: Updates stats/summary when invoices are created/updated/deleted
- * sendEmail: HTTP endpoint to send one email via Resend (optional; main sending is in Next.js/Vercel)
+ * sendEmail: HTTP endpoint to send one email via SES (sendEmailSes)
+ * runChaseScheduler: Scheduled every 5 minutes; processes eligible invoices and sends chase emails via SESv2
  */
 
 import * as functions from "firebase-functions";
+import { setGlobalOptions } from "firebase-functions/v2";
 import { onRequest } from "firebase-functions/v2/https";
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
-import { Resend } from "resend";
+import { sendEmailSes } from "./email/ses";
+import { runChaseScheduler, runChaseSchedulerLogic } from "./scheduler/runChaseScheduler";
 
 // Initialize Firebase Admin
 admin.initializeApp();
+
+setGlobalOptions({
+  region: "us-central1",
+  secrets: ["AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "SES_FROM_EMAIL"],
+});
 
 /**
  * Get month key in YYYY-MM format from a timestamp
@@ -71,12 +80,15 @@ async function updateStatsSummary(
  * Path pattern: businessProfiles/{uid}/invoices/{invoiceId}.
  * Stats: businessProfiles/{uid}/stats/summary
  */
-export const onInvoiceWrite = functions.firestore
-  .document("businessProfiles/{uid}/invoices/{invoiceId}")
-  .onWrite(async (change, context) => {
-    const { uid: userId, invoiceId } = context.params;
+export const onInvoiceWrite = onDocumentWritten(
+  { document: "businessProfiles/{uid}/invoices/{invoiceId}" },
+  async (event) => {
+    const change = event.data;
+    if (!change) return;
     const before = change.before;
     const after = change.after;
+    const userId = event.params.uid;
+    const invoiceId = event.params.invoiceId;
 
     const beforeData = before.exists ? before.data() : null;
     const afterData = after.exists ? after.data() : null;
@@ -348,13 +360,11 @@ export const onInvoiceWrite = functions.firestore
   });
 
 /**
- * HTTP endpoint to send one email via Resend.
- * Use when moving email sending to Firebase (e.g. from Firestore triggers or scheduler).
- * Configure RESEND_API_KEY and optionally EMAIL_FUNCTION_SECRET (x-email-secret header).
- * From address: RESEND_FROM or "Invoice Chaser <onboarding@resend.dev>".
+ * HTTP endpoint to send one email via SES (sendEmailSes).
+ * Requires: AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, SES_FROM_EMAIL (e.g. Firebase Secrets).
+ * Optional: EMAIL_FUNCTION_SECRET (x-email-secret header).
  */
 export const sendEmail = onRequest(async (req, res) => {
-  // CORS for same-origin or configured origins
   res.set("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") {
     res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -374,12 +384,6 @@ export const sendEmail = onRequest(async (req, res) => {
     return;
   }
 
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  if (!apiKey) {
-    res.status(503).json({ error: "Resend not configured; set RESEND_API_KEY" });
-    return;
-  }
-
   let body: { to?: string; subject?: string; html?: string; text?: string };
   try {
     body = typeof req.body === "object" && req.body ? req.body : JSON.parse(req.body || "{}");
@@ -394,25 +398,54 @@ export const sendEmail = onRequest(async (req, res) => {
     return;
   }
 
-  const from = process.env.RESEND_FROM?.trim() || "Invoice Chaser <onboarding@resend.dev>";
-
   try {
-    const resend = new Resend(apiKey);
-    const { error } = await resend.emails.send({
-      from,
-      to: [to],
+    const result = await sendEmailSes({
+      to,
       subject,
-      html: typeof html === "string" ? html : undefined,
+      html: typeof html === "string" ? html : "",
       text: typeof text === "string" ? text : undefined,
     });
-    if (error) {
-      functions.logger.warn("[sendEmail] Resend error:", error);
-      res.status(502).json({ error: `Resend: ${error.message}` });
-      return;
-    }
-    res.status(200).json({ ok: true });
+    res.status(200).json({ ok: true, messageId: result.messageId });
   } catch (e) {
-    functions.logger.error("[sendEmail]", e);
-    res.status(500).json({ error: "Failed to send" });
+    const msg = e instanceof Error ? e.message : String(e);
+    functions.logger.warn("[sendEmail] SES error:", msg);
+    res.status(502).json({ error: msg });
   }
 });
+
+/**
+ * DEV ONLY: HTTP endpoint to force-run the chase scheduler on demand.
+ * Kill-switch: DISABLE_DEV_ENDPOINTS=true → 404. x-dev-token must match DEV_TEST_TOKEN when set.
+ * Uses runChaseSchedulerLogic; do not duplicate logic.
+ */
+export const forceRunChaseScheduler = onRequest(
+  { secrets: ["DEV_TEST_TOKEN", "DISABLE_DEV_ENDPOINTS"] },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type, x-dev-token");
+      res.status(204).end();
+      return;
+    }
+    if (req.method !== "GET" && req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    if (process.env.DISABLE_DEV_ENDPOINTS === "true") {
+      res.status(404).end();
+      return;
+    }
+    const devToken = process.env.DEV_TEST_TOKEN;
+    if (devToken && req.get("x-dev-token") !== devToken) {
+      res.status(401).json({ error: "UNAUTHORIZED" });
+      return;
+    }
+    functions.logger.info("[forceRunChaseScheduler] DEV: starting");
+    await runChaseSchedulerLogic();
+    functions.logger.info("[forceRunChaseScheduler] DEV: finished");
+    res.status(200).json({ ok: true });
+  }
+);
+
+export { runChaseScheduler };
