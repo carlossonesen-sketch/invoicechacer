@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
@@ -83,8 +83,10 @@ const faqs = [
 
 export default function PricingPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
+  const [trialExpiredBanner, setTrialExpiredBanner] = useState(false);
   const { showToast, ToastComponent } = useToast();
 
   useEffect(() => {
@@ -95,46 +97,32 @@ export default function PricingPage() {
     return () => unsubscribe();
   }, []);
 
-  async function handleStartTrial() {
-    if (!isLoggedIn) return;
-
-    setLoading("trial");
-    try {
-      const user = auth?.currentUser;
-      if (!user) return;
-
-      const idToken = await user.getIdToken();
-      const res = await fetch("/api/trial/start", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${idToken}` },
-      });
-
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; trialEndsAt?: string; reason?: string; error?: string; message?: string };
-
-      if (!res.ok) {
-        if (res.status === 401) {
-          router.push(`/login?redirect=${encodeURIComponent("/pricing")}`);
-          return;
-        }
-        showToast(data.message || data.error || "Failed to start trial", "error");
-        setLoading(null);
-        return;
-      }
-
-      if (data.ok && data.reason === "already_paid") {
-        showToast("You already have an active subscription.", "info");
-        setLoading(null);
-        return;
-      }
-
-      showToast("Trial started. Redirecting to dashboard...", "success");
-      setTimeout(() => router.push("/dashboard"), 800);
-    } catch (error) {
-      console.error("Failed to start trial:", error);
-      showToast("Failed to start trial. Please try again.", "error");
-      setLoading(null);
+  // Show "trial expired" banner when ?reason=trial_expired or when server says trialExpired && !isPaid
+  useEffect(() => {
+    if (searchParams.get("reason") === "trial_expired") {
+      setTrialExpiredBanner(true);
+      return;
     }
-  }
+    if (!isLoggedIn || !auth?.currentUser) {
+      setTrialExpiredBanner(false);
+      return;
+    }
+    let mounted = true;
+    (async () => {
+      try {
+        const token = await auth.currentUser!.getIdToken();
+        const res = await fetch("/api/auth/trial-status", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!mounted) return;
+        const data = (await res.json().catch(() => ({}))) as { trialExpired?: boolean; isPaid?: boolean };
+        setTrialExpiredBanner(!!(data.trialExpired && !data.isPaid));
+      } catch {
+        if (mounted) setTrialExpiredBanner(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [isLoggedIn, searchParams]);
 
   async function handleSubscribe(tierId: string) {
     if (!isLoggedIn) return;
@@ -190,6 +178,11 @@ export default function PricingPage() {
     <div className="min-h-screen bg-gray-50">
       <Header title="Invoice Chaser" />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        {trialExpiredBanner && (
+          <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900" role="alert">
+            <p className="font-semibold">Free trial expired — please subscribe to continue.</p>
+          </div>
+        )}
         {/* Hero Section */}
         <div className="text-center mb-16">
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
@@ -200,13 +193,13 @@ export default function PricingPage() {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             {isLoggedIn ? (
-              <Button onClick={handleStartTrial} size="lg" disabled={loading !== null}>
-                {loading === "trial" ? "Starting…" : "Start free trial"}
+              <Button onClick={() => router.push("/dashboard")} size="lg">
+                Go to dashboard
               </Button>
             ) : (
-              <p className="text-gray-600">
-                Please <a href="/login" className="text-blue-600 hover:underline font-medium">sign in</a> to start a free trial.
-              </p>
+              <Button onClick={() => router.push("/login")} size="lg">
+                Log in
+              </Button>
             )}
             <Button onClick={handleSeeHowItWorks} variant="secondary" size="lg">
               See how it works
@@ -273,24 +266,14 @@ export default function PricingPage() {
               </div>
               <div className="space-y-2">
                 {isLoggedIn ? (
-                  <>
-                    <Button
-                      onClick={handleStartTrial}
-                      variant={tier.popular ? undefined : "secondary"}
-                      className="w-full"
-                      disabled={loading !== null}
-                    >
-                      {loading === "trial" ? "Starting…" : "Start free trial"}
-                    </Button>
-                    <Button
-                      onClick={() => handleSubscribe(tier.id)}
-                      variant={tier.popular ? "secondary" : "ghost"}
-                      className="w-full"
-                      disabled={loading !== null}
-                    >
-                      {loading === `subscribe-${tier.id}` ? "Loading…" : "Subscribe"}
-                    </Button>
-                  </>
+                  <Button
+                    onClick={() => handleSubscribe(tier.id)}
+                    variant={tier.popular ? undefined : "secondary"}
+                    className="w-full"
+                    disabled={loading !== null}
+                  >
+                    {loading === `subscribe-${tier.id}` ? "Loading…" : "Subscribe"}
+                  </Button>
                 ) : (
                   <p className="text-sm text-gray-600 text-center py-2">
                     Please <a href="/login" className="text-blue-600 hover:underline font-medium">sign in</a> to subscribe.
@@ -339,25 +322,29 @@ export default function PricingPage() {
         {/* Footer CTA */}
         <div className="bg-blue-600 rounded-lg p-12 text-center text-white">
           <h2 className="text-3xl font-bold mb-4">
-            Start free trial in 60 seconds
+            Get started in 60 seconds
           </h2>
           <p className="text-blue-100 mb-6 text-lg">
-            No credit card required. Get started today and see how Invoice Chaser helps you get paid faster.
+            No credit card required. Create an account and your trial starts automatically.
           </p>
           {isLoggedIn ? (
             <Button
-              onClick={handleStartTrial}
+              onClick={() => router.push("/dashboard")}
               variant="secondary"
               size="lg"
               className="bg-white text-blue-600 hover:bg-gray-100"
-              disabled={loading !== null}
             >
-              {loading === "trial" ? "Starting…" : "Start free trial"}
+              Go to dashboard
             </Button>
           ) : (
-            <p className="text-blue-100">
-              Please <a href="/login" className="text-white font-semibold hover:underline">sign in</a> to start a free trial.
-            </p>
+            <Button
+              onClick={() => router.push("/login")}
+              variant="secondary"
+              size="lg"
+              className="bg-white text-blue-600 hover:bg-gray-100"
+            >
+              Create account
+            </Button>
           )}
         </div>
       </main>

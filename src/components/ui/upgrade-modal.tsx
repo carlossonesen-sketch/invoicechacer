@@ -17,11 +17,6 @@ export function UpgradeModal({ isOpen, onClose, title, message }: UpgradeModalPr
 
   const handleUpgrade = () => {
     onClose();
-    router.push("/trial");
-  };
-
-  const handleViewPlans = () => {
-    onClose();
     router.push("/pricing");
   };
 
@@ -48,9 +43,6 @@ export function UpgradeModal({ isOpen, onClose, title, message }: UpgradeModalPr
               Cancel
             </Button>
             <Button onClick={handleUpgrade}>
-              Start free trial
-            </Button>
-            <Button variant="secondary" onClick={handleViewPlans}>
               View plans
             </Button>
           </div>

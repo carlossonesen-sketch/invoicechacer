@@ -60,6 +60,7 @@ firebase-adminsdk*.json
 .env*.local
 
 # firebase admin / service accounts (never commit)
+serviceAccountKey.json
 firebase-adminsdk*.json
 *-firebase-adminsdk-*.json
 *adminsdk*.json

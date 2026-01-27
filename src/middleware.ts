@@ -1,58 +1,91 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-export function middleware(request: NextRequest) {
-  // Kill-switch: 404 all /api/dev when DISABLE_DEV_ENDPOINTS=true (dev routes keep their own dev-token checks)
+/**
+ * Paths that trial-expired (and not paid) users may access.
+ * Any other route redirects to /pricing?reason=trial_expired.
+ * To extend the allowlist later: add entries to TRIAL_ALLOWLIST_PREFIXES (e.g. "/help")
+ * or add a custom check in isTrialAllowlisted (e.g. pathname.startsWith("/new-area")).
+ */
+const TRIAL_ALLOWLIST_PREFIXES = [
+  "/",
+  "/login",
+  "/dashboard",
+  "/invoices",
+  "/settings",
+  "/pricing",
+  "/onboarding",
+  "/business-profile",
+] as const;
+
+function isTrialAllowlisted(pathname: string): boolean {
+  if (pathname === "/") return true;
+  return TRIAL_ALLOWLIST_PREFIXES.some((p) => p !== "/" && (pathname === p || pathname.startsWith(p + "/")));
+}
+
+/** Paths unauthenticated users may access (others redirect to login). */
+const UNAUTH_PUBLIC_PREFIXES = ["/", "/login", "/pricing"] as const;
+
+function isUnauthPublic(pathname: string): boolean {
+  if (pathname === "/") return true;
+  return UNAUTH_PUBLIC_PREFIXES.some((p) => p !== "/" && (pathname === p || pathname.startsWith(p + "/")));
+}
+
+export async function middleware(request: NextRequest) {
+  // Kill-switch: 404 all /api/dev when DISABLE_DEV_ENDPOINTS=true
   if (request.nextUrl.pathname.startsWith("/api/dev") && process.env.DISABLE_DEV_ENDPOINTS === "true") {
     return new NextResponse(null, { status: 404 });
   }
 
-  // Allow API routes to pass through (they handle auth internally)
+  // API routes pass through (they handle auth internally; /api/auth/trial-status is called by middleware only)
   if (request.nextUrl.pathname.startsWith("/api")) {
     return NextResponse.next();
   }
 
-  // Check for session cookie (new Firebase auth) or legacy auth cookie (for migration)
   const sessionCookie = request.cookies.get("invoicechaser_session");
   const legacyCookie = request.cookies.get("invoicechaser_auth");
   const hasAuth = !!(sessionCookie?.value || legacyCookie?.value);
-  
-  const isLoginPage = request.nextUrl.pathname === "/login";
-  const isApiRoute = request.nextUrl.pathname.startsWith("/api");
+  const pathname = request.nextUrl.pathname;
 
-  // Allow API routes to pass through (they handle auth internally)
-  if (isApiRoute) {
-    return NextResponse.next();
-  }
-
-  // If user is trying to access login page and is already authenticated, redirect to home
-  if (isLoginPage && hasAuth) {
-    return NextResponse.redirect(new URL("/", request.url));
-  }
-
-  // If user is not authenticated and trying to access protected routes, redirect to login
-  if (!isLoginPage && !hasAuth) {
+  // Unauthenticated: only allow public paths, else redirect to login
+  if (!hasAuth) {
+    if (pathname === "/login") return NextResponse.next();
+    if (isUnauthPublic(pathname)) return NextResponse.next();
     const loginUrl = new URL("/login", request.url);
-    // Preserve the original URL to redirect back after login
-    loginUrl.searchParams.set("redirect", request.nextUrl.pathname);
+    loginUrl.searchParams.set("redirect", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
+  // Authenticated on login page -> send home
+  if (pathname === "/login") {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+
+  // Trial-expired paywall: if path is allowlisted, continue; else check trial and redirect if expired+not paid
+  if (isTrialAllowlisted(pathname)) {
+    return NextResponse.next();
+  }
+
+  // Call server-side trial-status (same origin; cookies forwarded)
+  const trialStatusUrl = new URL("/api/auth/trial-status", request.url);
+  try {
+    const res = await fetch(trialStatusUrl.toString(), {
+      headers: { Cookie: request.headers.get("cookie") ?? "" },
+      cache: "no-store",
+    });
+    const data = (await res.json()) as { trialExpired?: boolean; isPaid?: boolean };
+    if (data.trialExpired && !data.isPaid) {
+      return NextResponse.redirect(new URL("/pricing?reason=trial_expired", request.url));
+    }
+  } catch {
+    // On failure, allow through to avoid blocking
+  }
   return NextResponse.next();
 }
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public files (images, etc.)
-     */
     "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
-    // /api/dev/*: run middleware for dev kill-switch (DISABLE_DEV_ENDPOINTS)
     "/api/dev",
     "/api/dev/:path*",
   ],

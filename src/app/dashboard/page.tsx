@@ -20,6 +20,17 @@ import { useEntitlements } from "@/hooks/useEntitlements";
 import { toJsDate } from "@/lib/dates";
 import { User } from "firebase/auth";
 
+function formatTrialCountdown(end: Date): string {
+  const now = new Date();
+  const ms = end.getTime() - now.getTime();
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+  if (hours < 24) {
+    return hours <= 0 ? "today" : `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? "day" : "days"}`;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -34,6 +45,8 @@ export default function DashboardPage() {
   const [, setProfileResolved] = useState(false);
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [profileRetryCount, setProfileRetryCount] = useState(0);
+  const [trialEndsAt, setTrialEndsAt] = useState<Date | null>(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
   const [invoiceLoadError, setInvoiceLoadError] = useState<string | null>(null);
   const [realtimePaused, setRealtimePaused] = useState(false);
   const pageMountTime = useRef<number>(Date.now());
@@ -79,7 +92,14 @@ export default function DashboardPage() {
         const res = await fetch("/api/business-profile", {
           headers: { Authorization: `Bearer ${idToken}` },
         });
-        const data = (await res.json().catch(() => ({}))) as { exists?: boolean; profile?: unknown; error?: string; message?: string };
+        const data = (await res.json().catch(() => ({}))) as {
+          exists?: boolean;
+          profile?: unknown;
+          trialEndsAt?: string | null;
+          subscriptionStatus?: string | null;
+          error?: string;
+          message?: string;
+        };
 
         if (!res.ok) {
           if (res.status === 401) {
@@ -107,6 +127,9 @@ export default function DashboardPage() {
           }
         } else {
           setProfileResolved(true);
+          const te = data.trialEndsAt;
+          setTrialEndsAt(te ? (() => { const d = new Date(te); return isNaN(d.getTime()) ? null : d; })() : null);
+          setSubscriptionStatus(data.subscriptionStatus ?? null);
         }
       } catch (profileError) {
         const err = profileError instanceof Error ? profileError : new Error(String(profileError));
@@ -464,23 +487,22 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Upgrade Banner — hide when 0 invoices to keep focus on first action */}
+          {/* Upgrade + trial countdown: shown when not paid; trial timer hidden when expired or paid */}
           {!isPro && hasInvoices && (
             <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-blue-900">Unlock Pro Features</h3>
-                  <p className="text-sm text-blue-700 mt-1">
-                    Get auto-chase emails, custom cadence, and priority support.
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <Button onClick={() => router.push("/trial")} size="sm">
-                    Start free trial
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Button onClick={() => router.push("/pricing")} size="sm">
+                    Upgrade
                   </Button>
-                  <Button onClick={() => router.push("/settings/billing")} variant="secondary" size="sm">
-                    View plans
-                  </Button>
+                  {trialEndsAt && subscriptionStatus === "trial" && trialEndsAt > new Date() && (
+                    <span
+                      className="text-sm text-blue-800"
+                      title={trialEndsAt ? `Ends ${trialEndsAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : undefined}
+                    >
+                      Trial ends in {formatTrialCountdown(trialEndsAt)}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

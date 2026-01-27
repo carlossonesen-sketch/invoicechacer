@@ -376,10 +376,7 @@ export default function BillingPage() {
                 Ready to unlock auto-chase emails and more?
               </p>
               <div className="flex gap-4 justify-center">
-                <Button onClick={() => router.push("/trial")}>
-                  Start Free Trial
-                </Button>
-                <Button onClick={() => router.push("/pricing")} variant="secondary">
+                <Button onClick={() => router.push("/pricing")}>
                   View Pricing
                 </Button>
               </div>

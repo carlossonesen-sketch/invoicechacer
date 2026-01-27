@@ -7,8 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
 import { getAuthenticatedUserId } from "@/lib/api/auth";
-import { Timestamp } from "firebase-admin/firestore";
-import { FieldValue } from "firebase-admin/firestore";
+import { Timestamp, FieldValue } from "firebase-admin/firestore";
 
 export const runtime = "nodejs";
 
@@ -78,7 +77,22 @@ export async function GET(request: NextRequest) {
     }
 
     const profile = toProfileJson(snap.id, data);
-    return NextResponse.json({ exists: true, profile });
+    const trialEndsAt = data.trialEndsAt;
+    const trialEndsAtIso =
+      trialEndsAt instanceof Timestamp
+        ? trialEndsAt.toDate().toISOString()
+        : typeof trialEndsAt === "string"
+          ? trialEndsAt
+          : trialEndsAt && typeof trialEndsAt === "object" && "toDate" in trialEndsAt
+            ? (trialEndsAt as { toDate: () => Date }).toDate().toISOString()
+            : undefined;
+    return NextResponse.json({
+      exists: true,
+      profile,
+      trialEndsAt: trialEndsAtIso ?? null,
+      subscriptionStatus: (data.subscriptionStatus as string) ?? null,
+      plan: (data.plan as string) ?? null,
+    });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Unknown error";
     if (msg.startsWith("UNAUTHORIZED")) {
@@ -165,6 +179,13 @@ export async function POST(request: NextRequest) {
     if (defaultPaymentLink !== undefined) updateData.defaultPaymentLink = defaultPaymentLink;
     if (!existing.exists) {
       updateData.createdAt = FieldValue.serverTimestamp();
+      const trialEnd = new Date();
+      trialEnd.setDate(trialEnd.getDate() + 7);
+      updateData.trialStartedAt = FieldValue.serverTimestamp();
+      updateData.trialEndsAt = Timestamp.fromDate(trialEnd);
+      updateData.trialStatus = "active";
+      updateData.subscriptionStatus = "trial";
+      updateData.plan = "trial";
     }
 
     await profileRef.set(updateData, { merge: true });

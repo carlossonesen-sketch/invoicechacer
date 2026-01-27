@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:stats": "tsx scripts/test-stats-with-token.ts",
-    "migrate:invoices": "tsx scripts/migrate-invoices-to-scoped.ts"
+    "migrate:invoices": "tsx scripts/migrate-invoices-to-scoped.ts",
+    "delete:test-users": "tsx scripts/delete-test-users.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.975.0",
