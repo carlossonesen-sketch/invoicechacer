@@ -144,8 +144,14 @@ export async function runChaseSchedulerLogic(): Promise<void> {
     for (const doc of snap.docs) {
       const data = doc.data();
       const invoiceRef = doc.ref;
-      const chaseEventsRef = invoiceRef.collection("chaseEvents");
       const uid = invoiceRef.parent?.parent?.id ?? data.userId ?? "";
+      const invoiceId = doc.id;
+      const chaseEventsRef = db
+        .collection("businessProfiles")
+        .doc(uid)
+        .collection("invoices")
+        .doc(invoiceId)
+        .collection("chaseEvents");
 
       if (!data.customerEmail?.trim() || !data.dueAt) {
         skipped++;
