@@ -114,11 +114,17 @@ async function hasChaseInWindow(
   weekNumber: number | undefined,
   since: Date
 ): Promise<boolean> {
-  let q = chaseRef.where("type", "==", type).where("createdAt", ">=", Timestamp.fromDate(since));
+  // Query matches composite index (type ASC, createdAt ASC). No extra where clauses.
+  const q = chaseRef
+    .where("type", "==", type)
+    .where("createdAt", ">=", Timestamp.fromDate(since))
+    .orderBy("createdAt", "asc")
+    .limit(100);
+  const snap = await q.get();
   if (type === "invoice_late_weekly" && weekNumber != null) {
-    q = q.where("weekNumber", "==", weekNumber) as admin.firestore.Query;
+    const match = snap.docs.find((d) => d.data().weekNumber === weekNumber);
+    return !!match;
   }
-  const snap = await q.limit(1).get();
   return !snap.empty;
 }
 
