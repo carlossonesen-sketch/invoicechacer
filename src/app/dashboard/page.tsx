@@ -31,6 +31,8 @@ export default function DashboardPage() {
   const [allInvoices, setAllInvoices] = useState<FirestoreInvoice[]>([]);
   const [checkingProfile, setCheckingProfile] = useState(true);
   const [, setProfileResolved] = useState(false);
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
+  const [profileRetryCount, setProfileRetryCount] = useState(0);
   const pageMountTime = useRef<number>(Date.now());
   const firstRenderTime = useRef<number | null>(null);
   const invoiceUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -68,18 +70,30 @@ export default function DashboardPage() {
       setUser(currentUser);
 
       // Onboarding gate: Check if business profile exists via server API (no client Firestore)
+      setProfileLoadError(null);
       try {
         const idToken = await currentUser.getIdToken();
-        const res = await fetch("/api/business-profile/exists", {
+        const res = await fetch("/api/business-profile", {
           headers: { Authorization: `Bearer ${idToken}` },
         });
-        const data = (await res.json().catch(() => ({}))) as { exists?: boolean; error?: string; message?: string };
+        const data = (await res.json().catch(() => ({}))) as { exists?: boolean; profile?: unknown; error?: string; message?: string };
 
         if (!res.ok) {
-          console.error("[dashboard] business-profile exists check failed:", res.status, data.message ?? data.error ?? "unknown");
+          if (res.status === 401) {
+            router.replace("/login?redirect=" + encodeURIComponent("/dashboard"));
+            return;
+          }
+          console.error("[dashboard] business-profile check failed:", res.status, data.message ?? data.error ?? "unknown");
+          setProfileLoadError("Could not load company profile. Please retry.");
           setProfileResolved(true);
-        } else if (!data.exists) {
+          setCheckingProfile(false);
+          setLoading(false);
+          return;
+        }
+
+        if (!data.exists) {
           setProfileResolved(true);
+          setCheckingProfile(false);
           if (pathname === "/dashboard" && !didRedirectRef.current) {
             didRedirectRef.current = true;
             if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
@@ -93,9 +107,12 @@ export default function DashboardPage() {
         }
       } catch (profileError) {
         const err = profileError instanceof Error ? profileError : new Error(String(profileError));
-        console.error("[dashboard] business-profile exists check failed: no response, error.message:", err.message);
+        console.error("[dashboard] business-profile check failed: no response, error.message:", err.message);
+        setProfileLoadError("Could not load company profile. Please retry.");
         setProfileResolved(true);
-        // Continue to dashboard even if profile check fails
+        setCheckingProfile(false);
+        setLoading(false);
+        return;
       }
       setCheckingProfile(false);
       
@@ -134,7 +151,7 @@ export default function DashboardPage() {
         invoiceUnsubscribeRef.current = null;
       }
     };
-  }, [router, pathname]);
+  }, [router, pathname, profileRetryCount]);
 
   // Memoize KPI calculations to avoid recalculation on every render
   const kpis = useMemo(() => {
@@ -341,6 +358,30 @@ export default function DashboardPage() {
         <Header title="Dashboard" />
         <div className="flex-1 overflow-auto p-6">
           <DashboardSkeleton />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (profileLoadError) {
+    return (
+      <AppLayout>
+        <Header title="Dashboard" />
+        <div className="flex-1 overflow-auto p-6">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-2xl">
+            <h3 className="text-lg font-semibold text-red-900 mb-2">Could not load company profile</h3>
+            <p className="text-red-800 mb-4">{profileLoadError}</p>
+            <Button
+              onClick={() => {
+                setProfileLoadError(null);
+                setCheckingProfile(true);
+                setProfileRetryCount((c) => c + 1);
+              }}
+              variant="secondary"
+            >
+              Retry
+            </Button>
+          </div>
         </div>
       </AppLayout>
     );

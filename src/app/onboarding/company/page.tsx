@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { upsertBusinessProfile } from "@/lib/businessProfile";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -72,23 +71,36 @@ export default function CompanyOnboardingPage() {
     setErrors({});
 
     try {
-      await upsertBusinessProfile(user.uid, {
-        companyName: formData.companyName.trim(),
-        companyEmail: formData.companyEmail.trim() || undefined,
-        phone: formData.phone.trim() || undefined,
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/business-profile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          companyName: formData.companyName.trim(),
+          companyEmail: formData.companyEmail.trim() || undefined,
+          phone: formData.phone.trim() || undefined,
+        }),
       });
 
-      // Redirect to dashboard after successful save
-      const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-      if (devToolsEnabled) {
+      await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setErrors({ submit: "Could not save company profile. Please retry." });
+        setSaving(false);
+        return;
+      }
+
+      if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
         console.log("[redirect->dashboard]", { pathname: window.location.pathname, reason: "Post-onboarding save" });
-        console.trace("redirect->dashboard trace");
       }
       router.push("/dashboard");
     } catch (error: unknown) {
-      console.error("Failed to save company profile:", error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to save company profile. Please try again.";
-      setErrors({ submit: errorMessage });
+      const err = error instanceof Error ? error : new Error(String(error));
+      console.error("Failed to save company profile:", err.message);
+      setErrors({ submit: "Could not save company profile. Please retry." });
       setSaving(false);
     }
   }
