@@ -1,6 +1,6 @@
 import { initializeApp, getApps, FirebaseApp } from "firebase/app";
 import { getAuth, Auth } from "firebase/auth";
-import { getFirestore, Firestore } from "firebase/firestore";
+import { initializeFirestore, Firestore } from "firebase/firestore";
 import { getPublicFirebaseEnv, assertPublicFirebaseEnv } from "./env";
 
 // Validate environment variables before initializing
@@ -31,7 +31,8 @@ if (typeof window !== "undefined") {
       app = getApps()[0];
     }
     auth = getAuth(app);
-    db = getFirestore(app);
+    // Use long-polling to avoid Edge/proxy "client is offline" errors (WebChannel/HTTP/2 often blocked).
+    db = initializeFirestore(app, { experimentalForceLongPolling: true, useFetchStreams: false });
   } else {
     // Firebase unavailable - do not initialize
     console.error("[Firebase] Missing required environment variables. Firebase features will be unavailable.");
