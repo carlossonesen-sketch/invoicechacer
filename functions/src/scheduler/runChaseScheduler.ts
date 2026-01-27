@@ -27,20 +27,6 @@ function toDate(v: admin.firestore.Timestamp | Date | string | null | undefined)
   return isNaN(d.getTime()) ? null : d;
 }
 
-async function hasEmailBeenSent(
-  db: admin.firestore.Firestore,
-  invoiceId: string,
-  type: string,
-  weekNumber?: number
-): Promise<boolean> {
-  let q = db.collection("emailEvents").where("invoiceId", "==", invoiceId).where("type", "==", type);
-  if (type === "invoice_late_weekly" && weekNumber != null) {
-    q = q.where("weekNumber", "==", weekNumber) as admin.firestore.Query;
-  }
-  const snap = await q.limit(1).get();
-  return !snap.empty;
-}
-
 function setChicago9AM(d: Date): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 15, 0, 0, 0));
 }
@@ -51,9 +37,10 @@ interface NextChase {
   weekNumber?: number;
 }
 
+const EPOCH = new Date(0);
+
 async function computeNextChase(
-  db: admin.firestore.Firestore,
-  invoiceId: string,
+  chaseEventsRef: admin.firestore.CollectionReference,
   dueAt: Date,
   status: string,
   now: Date
@@ -68,11 +55,11 @@ async function computeNextChase(
     const rem = new Date(dueAt);
     rem.setDate(rem.getDate() - 3);
     const at = setChicago9AM(rem);
-    if (!(await hasEmailBeenSent(db, invoiceId, "invoice_reminder"))) {
+    if (!(await hasChaseInWindow(chaseEventsRef, "invoice_reminder", undefined, EPOCH))) {
       return { type: "invoice_reminder", scheduledFor: at };
     }
   } else if (daysUntilDue > 0 && daysUntilDue < 3) {
-    if (!(await hasEmailBeenSent(db, invoiceId, "invoice_reminder"))) {
+    if (!(await hasChaseInWindow(chaseEventsRef, "invoice_reminder", undefined, EPOCH))) {
       return { type: "invoice_reminder", scheduledFor: now };
     }
   }
@@ -80,11 +67,11 @@ async function computeNextChase(
   // Due today
   if (daysUntilDue === 0) {
     const at = setChicago9AM(dueAt);
-    if (!(await hasEmailBeenSent(db, invoiceId, "invoice_due"))) {
+    if (!(await hasChaseInWindow(chaseEventsRef, "invoice_due", undefined, EPOCH))) {
       return { type: "invoice_due", scheduledFor: at };
     }
   } else if (daysUntilDue < 0) {
-    if (!(await hasEmailBeenSent(db, invoiceId, "invoice_due"))) {
+    if (!(await hasChaseInWindow(chaseEventsRef, "invoice_due", undefined, EPOCH))) {
       return { type: "invoice_due", scheduledFor: now };
     }
   }
@@ -96,7 +83,7 @@ async function computeNextChase(
       const start = 7 * w;
       const end = 7 * (w + 1);
       if (daysPast >= start && daysPast < end) {
-        if (!(await hasEmailBeenSent(db, invoiceId, "invoice_late_weekly", w))) {
+        if (!(await hasChaseInWindow(chaseEventsRef, "invoice_late_weekly", w, EPOCH))) {
           const d = new Date(dueAt);
           d.setDate(d.getDate() + start);
           return { type: "invoice_late_weekly", scheduledFor: setChicago9AM(d), weekNumber: w };
@@ -193,7 +180,7 @@ export async function runChaseSchedulerLogic(): Promise<void> {
             return { action: "skip" as const, reason: "lastChasedAt" };
           }
 
-          const next = await computeNextChase(db, doc.id, dueAt, d.status || "pending", now);
+          const next = await computeNextChase(chaseEventsRef, dueAt, d.status || "pending", now);
           if (!next || next.scheduledFor > now) {
             // Update nextChaseAt to avoid tight loop; clear lock
             const autoDays = typeof d.autoChaseDays === "number" ? d.autoChaseDays : 1;
@@ -305,7 +292,7 @@ export async function runChaseSchedulerLogic(): Promise<void> {
           });
         });
 
-        // Write to emailEvents so hasEmailBeenSent sees it
+        // Optional secondary log; send-history checks use chaseEvents (invoice subcollection).
         await db.collection("emailEvents").add({
           userId: uid,
           invoiceId: doc.id,
