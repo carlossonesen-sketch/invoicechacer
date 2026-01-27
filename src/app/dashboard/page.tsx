@@ -17,7 +17,6 @@ import { DashboardSkeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { formatCurrency } from "@/lib/utils";
 import { useEntitlements } from "@/hooks/useEntitlements";
-import { getBusinessProfile } from "@/lib/businessProfile";
 import { User } from "firebase/auth";
 
 export default function DashboardPage() {
@@ -68,35 +67,33 @@ export default function DashboardPage() {
       }
       setUser(currentUser);
 
-      // Onboarding gate: Check if business profile exists (only after auth + user.uid)
-      // Only enforce on dashboard entry, not globally
+      // Onboarding gate: Check if business profile exists via server API (no client Firestore)
       try {
-        if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
-          console.log("[DEV dashboard businessProfile] auth uid:", currentUser?.uid, "userIsNull:", !currentUser, "docPath:", `businessProfiles/${currentUser?.uid ?? "?"}`);
-        }
-        const profile = await getBusinessProfile(currentUser.uid);
-        setProfileResolved(true);
-        
-        if (!profile) {
-          // Redirect to onboarding if profile is missing
-          // Only redirect if we're on the dashboard page AND haven't redirected yet
+        const idToken = await currentUser.getIdToken();
+        const res = await fetch("/api/business-profile/exists", {
+          headers: { Authorization: `Bearer ${idToken}` },
+        });
+        const data = (await res.json().catch(() => ({}))) as { exists?: boolean; error?: string; message?: string };
+
+        if (!res.ok) {
+          console.error("[dashboard] business-profile exists check failed:", res.status, data.message ?? data.error ?? "unknown");
+          setProfileResolved(true);
+        } else if (!data.exists) {
+          setProfileResolved(true);
           if (pathname === "/dashboard" && !didRedirectRef.current) {
             didRedirectRef.current = true;
-            const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-            if (devToolsEnabled) {
+            if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
               console.log("[NAV DEBUG] router.replace('/onboarding/company')", { currentPathname: pathname, targetPathname: "/onboarding/company", condition: "Onboarding gate: no profile" });
             }
             router.replace("/onboarding/company");
             return;
           }
+        } else {
+          setProfileResolved(true);
         }
       } catch (profileError) {
-        console.error("Failed to check business profile on dashboard:", profileError);
-        if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
-          const c = profileError && typeof profileError === "object" && "code" in profileError ? (profileError as { code?: string }).code : undefined;
-          const m = profileError instanceof Error ? profileError.message : String(profileError);
-          console.log("[DEV dashboard businessProfile catch] code:", c, "message:", m);
-        }
+        const err = profileError instanceof Error ? profileError : new Error(String(profileError));
+        console.error("[dashboard] business-profile exists check failed: no response, error.message:", err.message);
         setProfileResolved(true);
         // Continue to dashboard even if profile check fails
       }
