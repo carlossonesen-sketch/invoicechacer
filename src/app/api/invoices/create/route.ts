@@ -8,6 +8,7 @@ import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { getPlanForUser, getPlanLimits } from "@/lib/billing/plan";
 import { getAuthenticatedUserId } from "@/lib/api/auth";
+import { requireActiveTrialOrPaid } from "@/lib/api/trial";
 import { getRequestId } from "@/lib/api/requestId";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { ApiError, isApiError } from "@/lib/api/ApiError";
@@ -55,6 +56,12 @@ export async function POST(request: NextRequest) {
     } catch (authError) {
       const msg = authError instanceof Error ? authError.message : "Authentication required";
       return NextResponse.json({ error: "UNAUTHORIZED", message: msg }, { status: 401 });
+    }
+
+    // Gate: require active trial or paid subscription (dashboard is read-only when expired)
+    const trialGate = await requireActiveTrialOrPaid(userId);
+    if (trialGate) {
+      return trialGate;
     }
 
     const body = await request.json();

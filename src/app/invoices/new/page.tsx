@@ -193,9 +193,16 @@ export default function NewInvoicePage() {
         setErrors({ submit: "Too many requests. Please try again later." });
         return;
       }
-      if (status === 403 && typeof code === "string" && code.startsWith("TRIAL_")) {
-        setUpgradeModalMessage("You've reached the trial limit for pending invoices. Upgrade to create more.");
-        setShowUpgradeModal(true);
+      if (status === 403 && typeof code === "string") {
+        if (code === "TRIAL_EXPIRED") {
+          const redirectTo = (error as { redirectTo?: string }).redirectTo || "/pricing?reason=trial_expired";
+          router.push(redirectTo);
+          return;
+        }
+        if (code.startsWith("TRIAL_")) {
+          setUpgradeModalMessage("You've reached the trial limit for pending invoices. Upgrade to create more.");
+          setShowUpgradeModal(true);
+        }
       }
       setErrors({ submit: errorMessage });
     }

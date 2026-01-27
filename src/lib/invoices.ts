@@ -314,11 +314,12 @@ export async function createInvoice(
   });
 
   /** Typed response: success has invoiceId; error has error + message (e.g. TRIAL_PENDING_LIMIT_REACHED). */
-  const data = (await res.json().catch(() => ({}))) as { invoiceId?: string; error?: string; message?: string };
+  const data = (await res.json().catch(() => ({}))) as { invoiceId?: string; error?: string; message?: string; redirectTo?: string };
 
   if (!res.ok) {
-    const err = new Error(data.message || "Failed to create invoice.") as Error & { code?: string; status?: number };
+    const err = new Error(data.message || "Failed to create invoice.") as Error & { code?: string; status?: number; redirectTo?: string };
     if (data.error) err.code = data.error;
+    if (data.redirectTo) err.redirectTo = data.redirectTo;
     err.status = res.status; // 401 auth, 403 plan/permission, 429 rate limit
     throw err;
   }

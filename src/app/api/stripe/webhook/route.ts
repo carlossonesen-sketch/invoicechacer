@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ received: true });
       }
 
-      const plan = (session.metadata?.plan as Plan) || "starter";
+      const plan = ((session.metadata?.tier || session.metadata?.plan) as Plan) || "starter";
       const customerId = typeof session.customer === "string" ? session.customer : session.customer?.id;
       const subId = typeof session.subscription === "string" ? session.subscription : session.subscription?.id;
 

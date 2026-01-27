@@ -1,7 +1,9 @@
 /**
  * Create a Stripe Checkout Session for subscription (Starter/Pro/Business).
  * POST /api/stripe/create-checkout-session
- * Body: { plan: "starter" | "pro" | "business" }
+ * Body: { tier: "starter" | "pro" | "business" } (or plan for backwards compat)
+ * Auth: Bearer token.
+ * Uses STRIPE_PRICE_STARTER, STRIPE_PRICE_PRO, STRIPE_PRICE_BUSINESS.
  * Returns: { url: string }
  */
 
@@ -39,19 +41,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Stripe not configured" }, { status: 503 });
     }
 
-    let body: { plan?: string };
+    let body: { plan?: string; tier?: string };
     try {
       body = await request.json();
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
-    const plan = body?.plan;
-    if (!plan || !PLANS.includes(plan as Plan)) {
-      return NextResponse.json({ error: "plan must be starter, pro, or business" }, { status: 400 });
+    const tier = body?.tier || body?.plan;
+    if (!tier || !PLANS.includes(tier as Plan)) {
+      return NextResponse.json({ error: "tier must be starter, pro, or business" }, { status: 400 });
     }
-    const priceId = getPriceId(plan as Plan);
+    const priceId = getPriceId(tier as Plan);
     if (!priceId) {
-      return NextResponse.json({ error: `Stripe price not configured for ${plan}` }, { status: 503 });
+      return NextResponse.json({ error: `Stripe price not configured for ${tier} (STRIPE_PRICE_${tier.toUpperCase()})` }, { status: 503 });
     }
 
     const base = getBaseUrl();
@@ -86,7 +88,7 @@ export async function POST(request: NextRequest) {
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
       client_reference_id: userId,
-      metadata: { userId, plan },
+      metadata: { userId, tier },
       success_url: successUrl,
       cancel_url: cancelUrl,
       ...(customerId ? { customer: customerId } : customerEmail ? { customer_email: customerEmail } : {}),

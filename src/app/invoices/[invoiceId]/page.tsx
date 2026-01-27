@@ -339,7 +339,7 @@ export default function InvoiceDetailPage() {
         body: JSON.stringify({ invoiceId: invoice.id }),
       });
 
-      const data = (await response.json().catch(() => ({}))) as { error?: string; message?: string; alreadySent?: boolean };
+      const data = (await response.json().catch(() => ({}))) as { error?: string; message?: string; alreadySent?: boolean; redirectTo?: string };
 
       if (!response.ok) {
         if (data.alreadySent) {
@@ -351,6 +351,11 @@ export default function InvoiceDetailPage() {
           showToast("Too many requests. Please try again later.", "error");
           setErrors({ submit: "Too many requests. Please try again later." });
         } else if (response.status === 403) {
+          if (data.error === "TRIAL_EXPIRED") {
+            const redirectTo = data.redirectTo || "/pricing?reason=trial_expired";
+            router.push(redirectTo);
+            return;
+          }
           if (data.error === "INVOICE_NOT_PENDING") {
             showToast(data.message || "This invoice can't be emailed because it's no longer pending.", "error");
             setErrors({ submit: data.message || "This invoice can't be emailed because it's no longer pending." });

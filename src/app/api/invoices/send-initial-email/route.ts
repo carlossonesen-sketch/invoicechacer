@@ -11,6 +11,7 @@ import { getRequestId } from "@/lib/api/requestId";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { isApiError } from "@/lib/api/ApiError";
 import { getAuthenticatedUserId } from "@/lib/api/auth";
+import { requireActiveTrialOrPaid } from "@/lib/api/trial";
 import { resolveInvoiceRefAndBusinessId } from "@/lib/invoicePaths";
 
 // Force Node.js runtime for Vercel
@@ -50,6 +51,12 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Authentication required";
       return NextResponse.json({ error: "UNAUTHORIZED", message: msg }, { status: 401 });
+    }
+
+    // Gate: require active trial or paid subscription
+    const trialGate = await requireActiveTrialOrPaid(userId);
+    if (trialGate) {
+      return trialGate;
     }
 
     const db = getAdminFirestore();

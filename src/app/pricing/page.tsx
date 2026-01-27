@@ -6,6 +6,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/layout/header";
+import { useToast } from "@/components/ui/toast";
 
 const tiers = [
   {
@@ -83,6 +84,8 @@ const faqs = [
 export default function PricingPage() {
   const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loading, setLoading] = useState<string | null>(null);
+  const { showToast, ToastComponent } = useToast();
 
   useEffect(() => {
     if (!auth) return;
@@ -92,14 +95,87 @@ export default function PricingPage() {
     return () => unsubscribe();
   }, []);
 
-  function handleStartTrial(tierId?: string) {
-    const plan = tierId || "pro"; // Default to pro if no tier specified
-    const trialUrl = `/trial?plan=${plan}`;
-    
-    if (isLoggedIn) {
-      router.push(trialUrl);
-    } else {
-      router.push(`/login?redirect=${encodeURIComponent(trialUrl)}`);
+  async function handleStartTrial() {
+    if (!isLoggedIn) return;
+
+    setLoading("trial");
+    try {
+      const user = auth?.currentUser;
+      if (!user) return;
+
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/trial/start", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; trialEndsAt?: string; reason?: string; error?: string; message?: string };
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          router.push(`/login?redirect=${encodeURIComponent("/pricing")}`);
+          return;
+        }
+        showToast(data.message || data.error || "Failed to start trial", "error");
+        setLoading(null);
+        return;
+      }
+
+      if (data.ok && data.reason === "already_paid") {
+        showToast("You already have an active subscription.", "info");
+        setLoading(null);
+        return;
+      }
+
+      showToast("Trial started. Redirecting to dashboard...", "success");
+      setTimeout(() => router.push("/dashboard"), 800);
+    } catch (error) {
+      console.error("Failed to start trial:", error);
+      showToast("Failed to start trial. Please try again.", "error");
+      setLoading(null);
+    }
+  }
+
+  async function handleSubscribe(tierId: string) {
+    if (!isLoggedIn) return;
+
+    setLoading(`subscribe-${tierId}`);
+    try {
+      const user = auth?.currentUser;
+      if (!user) return;
+
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/stripe/create-checkout-session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ tier: tierId }),
+      });
+
+      const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string; message?: string };
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          router.push(`/login?redirect=${encodeURIComponent("/pricing")}`);
+          return;
+        }
+        showToast(data.message || data.error || "Failed to create checkout session", "error");
+        setLoading(null);
+        return;
+      }
+
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        showToast("Failed to redirect to checkout", "error");
+        setLoading(null);
+      }
+    } catch (error) {
+      console.error("Failed to subscribe:", error);
+      showToast("Failed to subscribe. Please try again.", "error");
+      setLoading(null);
     }
   }
 
@@ -123,9 +199,15 @@ export default function PricingPage() {
             Invoice Chaser sends polite reminders, escalates when needed, and stops when they pay or reply.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button onClick={() => handleStartTrial()} size="lg">
-              Start free trial
-            </Button>
+            {isLoggedIn ? (
+              <Button onClick={handleStartTrial} size="lg" disabled={loading !== null}>
+                {loading === "trial" ? "Starting…" : "Start free trial"}
+              </Button>
+            ) : (
+              <p className="text-gray-600">
+                Please <a href="/login" className="text-blue-600 hover:underline font-medium">sign in</a> to start a free trial.
+              </p>
+            )}
             <Button onClick={handleSeeHowItWorks} variant="secondary" size="lg">
               See how it works
             </Button>
@@ -189,13 +271,32 @@ export default function PricingPage() {
                   </li>
                 </ul>
               </div>
-              <Button
-                onClick={() => handleStartTrial(tier.id)}
-                variant={tier.popular ? undefined : "secondary"}
-                className="w-full"
-              >
-                Start free trial
-              </Button>
+              <div className="space-y-2">
+                {isLoggedIn ? (
+                  <>
+                    <Button
+                      onClick={handleStartTrial}
+                      variant={tier.popular ? undefined : "secondary"}
+                      className="w-full"
+                      disabled={loading !== null}
+                    >
+                      {loading === "trial" ? "Starting…" : "Start free trial"}
+                    </Button>
+                    <Button
+                      onClick={() => handleSubscribe(tier.id)}
+                      variant={tier.popular ? "secondary" : "ghost"}
+                      className="w-full"
+                      disabled={loading !== null}
+                    >
+                      {loading === `subscribe-${tier.id}` ? "Loading…" : "Subscribe"}
+                    </Button>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-600 text-center py-2">
+                    Please <a href="/login" className="text-blue-600 hover:underline font-medium">sign in</a> to subscribe.
+                  </p>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -243,16 +344,24 @@ export default function PricingPage() {
           <p className="text-blue-100 mb-6 text-lg">
             No credit card required. Get started today and see how Invoice Chaser helps you get paid faster.
           </p>
-          <Button
-            onClick={() => handleStartTrial()}
-            variant="secondary"
-            size="lg"
-            className="bg-white text-blue-600 hover:bg-gray-100"
-          >
-            Start free trial
-          </Button>
+          {isLoggedIn ? (
+            <Button
+              onClick={handleStartTrial}
+              variant="secondary"
+              size="lg"
+              className="bg-white text-blue-600 hover:bg-gray-100"
+              disabled={loading !== null}
+            >
+              {loading === "trial" ? "Starting…" : "Start free trial"}
+            </Button>
+          ) : (
+            <p className="text-blue-100">
+              Please <a href="/login" className="text-white font-semibold hover:underline">sign in</a> to start a free trial.
+            </p>
+          )}
         </div>
       </main>
+      {ToastComponent}
     </div>
   );
 }
