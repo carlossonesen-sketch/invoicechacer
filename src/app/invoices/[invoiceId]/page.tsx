@@ -27,7 +27,7 @@ export default function InvoiceDetailPage() {
   const pathname = usePathname();
   const params = useParams();
   const searchParams = useSearchParams();
-  const invoiceId = params.id as string;
+  const invoiceId = params.invoiceId as string;
 
   // Check if edit mode is requested via query parameter
   const shouldStartEditing = searchParams.get("edit") === "1";
