@@ -17,6 +17,7 @@ import { DashboardSkeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/toast";
 import { formatCurrency } from "@/lib/utils";
 import { useEntitlements } from "@/hooks/useEntitlements";
+import { toJsDate } from "@/lib/dates";
 import { User } from "firebase/auth";
 
 export default function DashboardPage() {
@@ -33,6 +34,8 @@ export default function DashboardPage() {
   const [, setProfileResolved] = useState(false);
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
   const [profileRetryCount, setProfileRetryCount] = useState(0);
+  const [invoiceLoadError, setInvoiceLoadError] = useState<string | null>(null);
+  const [realtimePaused, setRealtimePaused] = useState(false);
   const pageMountTime = useRef<number>(Date.now());
   const firstRenderTime = useRef<number | null>(null);
   const invoiceUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -115,33 +118,62 @@ export default function DashboardPage() {
         return;
       }
       setCheckingProfile(false);
-      
-      // Clean up previous subscription if any
-      if (invoiceUnsubscribeRef.current) {
-        invoiceUnsubscribeRef.current();
-        invoiceUnsubscribeRef.current = null;
-      }
 
-      // Set up real-time subscription with limit
+      // Initial load via server API (works when Firestore client is degraded, e.g. Edge "client is offline")
       setLoading(true);
       setAllInvoices([]);
-      if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
-        console.log("[DEV dashboard invoices] function: subscribeToUserInvoices uid:", currentUser.uid);
-      }
-      invoiceUnsubscribeRef.current = subscribeToUserInvoices(currentUser, (invoiceResult) => {
-        setResult(invoiceResult);
-        setAllInvoices(invoiceResult.invoices);
+      setInvoiceLoadError(null);
+      setRealtimePaused(false);
+      try {
+        const idToken = await currentUser.getIdToken();
+        const listRes = await fetch("/api/invoices", { headers: { Authorization: `Bearer ${idToken}` } });
+        const listData = (await listRes.json().catch(() => ({}))) as { invoices?: FirestoreInvoice[]; error?: string; message?: string };
+        if (!listRes.ok) {
+          if (listRes.status === 401) {
+            router.replace("/login?redirect=" + encodeURIComponent("/dashboard"));
+            return;
+          }
+          setInvoiceLoadError(listData.message || listData.error || "Could not load invoices.");
+          setLoading(false);
+          setResult({ invoices: [] });
+          return;
+        }
+        const initialInvoices = Array.isArray(listData.invoices) ? listData.invoices : [];
+        setResult({ invoices: initialInvoices });
+        setAllInvoices(initialInvoices);
         setLoading(false);
-        
-        // Performance logging (dev-only)
-        if (firstRenderTime.current === null && invoiceResult.invoices.length > 0) {
+        if (firstRenderTime.current === null && initialInvoices.length > 0) {
           firstRenderTime.current = Date.now();
-          const timeToFirstRender = firstRenderTime.current - pageMountTime.current;
           if (process.env.NODE_ENV !== "production") {
-            console.log(`[Perf] Dashboard: ${timeToFirstRender}ms to first invoice render`);
+            console.log(`[Perf] Dashboard: ${firstRenderTime.current - pageMountTime.current}ms to first invoice render (API)`);
           }
         }
-      }, 25); // Limit to 25 invoices initially
+      } catch (apiErr) {
+        setInvoiceLoadError(apiErr instanceof Error ? apiErr.message : "Could not load invoices.");
+        setLoading(false);
+        setResult({ invoices: [] });
+        return;
+      }
+
+      // Optional realtime listener: non-blocking. On failure, keep showing API data; no redirect.
+      if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+        console.log("[DEV dashboard invoices] subscribeToUserInvoices uid:", currentUser.uid);
+      }
+      invoiceUnsubscribeRef.current = subscribeToUserInvoices(currentUser, (invoiceResult) => {
+        if (invoiceResult.error || invoiceResult.indexError) {
+          setRealtimePaused(true);
+          return;
+        }
+        setRealtimePaused(false);
+        setResult(invoiceResult);
+        setAllInvoices(invoiceResult.invoices);
+        if (firstRenderTime.current === null && invoiceResult.invoices.length > 0) {
+          firstRenderTime.current = Date.now();
+          if (process.env.NODE_ENV !== "production") {
+            console.log(`[Perf] Dashboard: ${firstRenderTime.current - pageMountTime.current}ms to first invoice render (listener)`);
+          }
+        }
+      }, 25);
     });
 
     return () => {
@@ -165,18 +197,14 @@ export default function DashboardPage() {
 
     const overdue = invoices
       .filter((inv) => {
-        const dueDate = typeof inv.dueAt === "string" 
-          ? new Date(inv.dueAt) 
-          : inv.dueAt?.toDate?.() || new Date();
+        const dueDate = toJsDate(inv.dueAt) || new Date();
         return inv.status === "overdue" || (inv.status === "pending" && dueDate < today);
       })
       .reduce((sum, inv) => sum + (inv.amount || 0), 0);
 
     const paidLast30Days = invoices
       .filter((inv) => {
-        const updatedDate = typeof inv.updatedAt === "string" 
-          ? new Date(inv.updatedAt) 
-          : inv.updatedAt?.toDate?.() || new Date(inv.createdAt as string);
+        const updatedDate = toJsDate(inv.updatedAt) || toJsDate(inv.createdAt) || new Date();
         return inv.status === "paid" && updatedDate >= last30Days;
       })
       .reduce((sum, inv) => sum + (inv.amount || 0), 0);
@@ -243,12 +271,8 @@ export default function DashboardPage() {
     
     return filtered
       .sort((a, b) => {
-        const dateA = typeof a.updatedAt === "string" 
-          ? new Date(a.updatedAt) 
-          : a.updatedAt?.toDate?.() || new Date(a.createdAt as string);
-        const dateB = typeof b.updatedAt === "string" 
-          ? new Date(b.updatedAt) 
-          : b.updatedAt?.toDate?.() || new Date(b.createdAt as string);
+        const dateA = toJsDate(a.updatedAt) || toJsDate(a.createdAt) || new Date();
+        const dateB = toJsDate(b.updatedAt) || toJsDate(b.createdAt) || new Date();
         return dateB.getTime() - dateA.getTime();
       })
       .slice(0, 10);
@@ -387,46 +411,24 @@ export default function DashboardPage() {
     );
   }
 
-  if (result.indexError) {
-    return (
-      <AppLayout>
-        <Header title="Dashboard" />
-        <div className="flex-1 overflow-auto p-6">
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 max-w-2xl">
-            <h3 className="text-lg font-semibold text-yellow-900 mb-2">Firestore Index Required</h3>
-            <p className="text-yellow-800 mb-4">{result.indexError.message}</p>
-            {result.indexError.consoleLink && (
-              <div className="space-y-2">
-                <p className="text-sm text-yellow-700">Click the link below to create the required index:</p>
-                <a
-                  href={result.indexError.consoleLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-block text-sm text-blue-600 hover:text-blue-800 underline"
-                >
-                  {result.indexError.consoleLink}
-                </a>
-              </div>
-            )}
-            <p className="text-sm text-yellow-700 mt-4">
-              The index should be created on the <code className="bg-yellow-100 px-1 rounded">invoices</code> collection
-              with fields: <code className="bg-yellow-100 px-1 rounded">userId (Ascending)</code> and{" "}
-              <code className="bg-yellow-100 px-1 rounded">createdAt (Descending)</code>
-            </p>
-          </div>
-        </div>
-      </AppLayout>
-    );
-  }
-
-  if (result.error && !result.indexError) {
+  if (invoiceLoadError) {
     return (
       <AppLayout>
         <Header title="Dashboard" />
         <div className="flex-1 overflow-auto p-6">
           <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-2xl">
             <h3 className="text-lg font-semibold text-red-900 mb-2">Error Loading Invoices</h3>
-            <p className="text-red-800">{result.error}</p>
+            <p className="text-red-800 mb-4">{invoiceLoadError}</p>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setInvoiceLoadError(null);
+                setLoading(true);
+                setProfileRetryCount((c) => c + 1);
+              }}
+            >
+              Retry
+            </Button>
           </div>
         </div>
       </AppLayout>
@@ -444,6 +446,11 @@ export default function DashboardPage() {
       </Header>
       <div className="flex-1 overflow-auto p-6">
         <div className="space-y-6">
+          {realtimePaused && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-800">
+              Live updates paused. Displaying last loaded data. Reconnect or refresh to retry.
+            </div>
+          )}
           {/* Get started: empty state when no invoices */}
           {!hasInvoices && (
             <div className="rounded-lg border-2 border-dashed border-blue-200 bg-blue-50/50 p-8 text-center">
@@ -586,16 +593,10 @@ export default function DashboardPage() {
                     </tr>
                   ) : (
                     recentInvoices.map((invoice) => {
-                      const dueDate = typeof invoice.dueAt === "string" 
-                        ? new Date(invoice.dueAt) 
-                        : invoice.dueAt?.toDate?.() || new Date();
-                      const updatedDate = typeof invoice.updatedAt === "string" 
-                        ? new Date(invoice.updatedAt) 
-                        : invoice.updatedAt?.toDate?.() || new Date(invoice.createdAt as string);
+                      const dueDate = toJsDate(invoice.dueAt) || new Date();
+                      const updatedDate = toJsDate(invoice.updatedAt) || toJsDate(invoice.createdAt) || new Date();
                       const isPaid = invoice.status === "paid" || !!invoice.paidAt;
-                      const paidDate = invoice.paidAt 
-                        ? (typeof invoice.paidAt === "string" ? new Date(invoice.paidAt) : invoice.paidAt.toDate())
-                        : null;
+                      const paidDate = invoice.paidAt ? toJsDate(invoice.paidAt) : null;
                       
                       return (
                         <tr

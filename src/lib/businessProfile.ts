@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, onSnapshot, Timestamp, serverTimestamp } from "firebase/firestore";
 import { db } from "./firebase";
+import { logFirestoreInstrumentation } from "./firestoreInstrumentation";
 
 export interface BusinessProfile {
   uid: string;
@@ -25,7 +26,13 @@ export async function getBusinessProfile(uid: string): Promise<BusinessProfile |
   }
 
   const profileRef = doc(db, "businessProfiles", uid);
-  const profileSnap = await getDoc(profileRef);
+  let profileSnap;
+  try {
+    profileSnap = await getDoc(profileRef);
+  } catch (error) {
+    logFirestoreInstrumentation("businessProfile:getDoc", error, { docPath: `businessProfiles/${uid}` });
+    throw error;
+  }
 
   if (!profileSnap.exists()) {
     return null;
@@ -82,16 +89,15 @@ export function subscribeBusinessProfile(
         callback(profile);
       },
       (error) => {
-        console.error("Error subscribing to business profile:", error);
+        logFirestoreInstrumentation("businessProfile:subscribe", error, { docPath: `businessProfiles/${uid}` });
         callback(null, error.message || "Failed to load business profile");
       }
     );
 
     return unsubscribe;
   } catch (error: unknown) {
-    console.error("Error setting up business profile subscription:", error);
-    const errorMessage = error instanceof Error ? error.message : "Failed to set up business profile subscription";
-    callback(null, errorMessage);
+    logFirestoreInstrumentation("businessProfile:subscribe setup", error, { docPath: `businessProfiles/${uid}` });
+    callback(null, error instanceof Error ? error.message : "Failed to set up business profile subscription");
     return () => {};
   }
 }

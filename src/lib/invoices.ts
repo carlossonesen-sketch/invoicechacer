@@ -2,6 +2,8 @@
 
 import { collection, query, where, orderBy, limit, getDocs, onSnapshot, doc, onSnapshot as onDocSnapshot, updateDoc, Timestamp, serverTimestamp, addDoc, writeBatch, QuerySnapshot, DocumentData, QueryDocumentSnapshot, startAfter } from "firebase/firestore";
 import { db, auth } from "./firebase";
+import { logFirestoreInstrumentation } from "./firestoreInstrumentation";
+import { toJsDate } from "./dates";
 import { User, onAuthStateChanged } from "firebase/auth";
 
 export interface FirestoreInvoice {
@@ -69,22 +71,17 @@ function convertSnapshotToInvoices(snapshot: QuerySnapshot<DocumentData>, user: 
       updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
     };
 
-    // Convert Timestamp to ISO string if needed
-    if (invoice.dueAt instanceof Timestamp) {
-      invoice.dueAt = invoice.dueAt.toDate().toISOString();
-    }
-    if (invoice.createdAt instanceof Timestamp) {
-      invoice.createdAt = invoice.createdAt.toDate().toISOString();
-    }
-    if (invoice.lastChasedAt instanceof Timestamp) {
-      invoice.lastChasedAt = invoice.lastChasedAt.toDate().toISOString();
-    }
-    if (invoice.nextChaseAt instanceof Timestamp) {
-      invoice.nextChaseAt = invoice.nextChaseAt.toDate().toISOString();
-    }
-    if (invoice.updatedAt instanceof Timestamp) {
-      invoice.updatedAt = invoice.updatedAt.toDate().toISOString();
-    }
+    // Convert Timestamp to ISO string if needed (handles Timestamp, string, number, {seconds} objects)
+    const dueDate = toJsDate(invoice.dueAt);
+    if (dueDate) invoice.dueAt = dueDate.toISOString();
+    const createdDate = toJsDate(invoice.createdAt);
+    if (createdDate) invoice.createdAt = createdDate.toISOString();
+    const lastChasedDate = toJsDate(invoice.lastChasedAt);
+    if (lastChasedDate) invoice.lastChasedAt = lastChasedDate.toISOString();
+    const nextChaseDate = toJsDate(invoice.nextChaseAt);
+    if (nextChaseDate) invoice.nextChaseAt = nextChaseDate.toISOString();
+    const updatedDate = toJsDate(invoice.updatedAt);
+    if (updatedDate) invoice.updatedAt = updatedDate.toISOString();
 
     invoices.push(invoice);
   });
@@ -140,15 +137,10 @@ export function subscribeToUserInvoices(
         });
       },
       (error: unknown) => {
-        console.error("Error subscribing to invoices:", error);
+        logFirestoreInstrumentation("invoices:subscribeToUserInvoices", error, {
+          queryPath: `businessProfiles/${user?.uid ?? "?"}/invoices`,
+        });
 
-        if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
-          const errCode = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
-          const errMsg = error instanceof Error ? error.message : String(error);
-          console.log("[DEV invoices sub onSnapshot error] code:", errCode, "message:", errMsg);
-        }
-
-        // Check if this is a Firestore index error
         const errorCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : undefined;
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (errorCode === "failed-precondition" || errorMessage?.includes("index")) {
@@ -175,18 +167,14 @@ export function subscribeToUserInvoices(
 
     return unsubscribe;
   } catch (error: unknown) {
-    console.error("Error setting up invoice subscription:", error);
-    if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
-      const c = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
-      const m = error instanceof Error ? error.message : String(error);
-      console.log("[DEV subscribeToUserInvoices catch] code:", c, "message:", m);
-    }
-    const errorMessage = error instanceof Error ? error.message : "Failed to set up invoice subscription";
+    logFirestoreInstrumentation("invoices:subscribeToUserInvoices setup", error, {
+      queryPath: `businessProfiles/${user?.uid ?? "?"}/invoices`,
+    });
     callback({
       invoices: [],
-      error: errorMessage,
+      error: error instanceof Error ? error.message : "Failed to set up invoice subscription",
     });
-    return () => {}; // Return empty unsubscribe function
+    return () => {};
   }
 }
 
@@ -229,12 +217,9 @@ export async function fetchNextPageOfInvoices(
       hasMore,
     };
   } catch (error: unknown) {
-    console.error("Error fetching next page of invoices:", error);
-    if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
-      const c = error && typeof error === "object" && "code" in error ? (error as { code?: string }).code : undefined;
-      const m = error instanceof Error ? error.message : String(error);
-      console.log("[DEV fetchNextPageOfInvoices catch] code:", c, "message:", m);
-    }
+    logFirestoreInstrumentation("invoices:fetchNextPageOfInvoices", error, {
+      queryPath: `businessProfiles/${user?.uid ?? "?"}/invoices`,
+    });
     return {
       invoices: [],
       error: error instanceof Error ? error.message : "Failed to fetch invoices",
@@ -264,11 +249,11 @@ export async function getUserInvoices(user: User): Promise<InvoiceQueryResult> {
 
     return { invoices, hasMissingCreatedAt };
   } catch (error: unknown) {
-    console.error("Error fetching invoices:", error);
-
+    logFirestoreInstrumentation("invoices:getUserInvoices", error, {
+      queryPath: `businessProfiles/${user?.uid ?? "?"}/invoices`,
+    });
     const err = error instanceof Error ? error : new Error(String(error));
     const errMsg = err.message;
-    // Check if this is a Firestore index error
     const errObj = error && typeof error === "object" && "code" in error ? error as { code?: string; message?: string } : null;
     if (errObj?.code === "failed-precondition" || errMsg?.includes("index")) {
       // Try to extract the index link from the error
@@ -452,22 +437,17 @@ function convertDocToInvoice(docData: DocumentData, docId: string, useServerTime
     updatedAt: data.updatedAt,
   };
 
-  // Convert Timestamp to ISO string if needed
-  if (invoice.dueAt instanceof Timestamp) {
-    invoice.dueAt = invoice.dueAt.toDate().toISOString();
-  }
-  if (invoice.createdAt instanceof Timestamp) {
-    invoice.createdAt = invoice.createdAt.toDate().toISOString();
-  }
-  if (invoice.lastChasedAt instanceof Timestamp) {
-    invoice.lastChasedAt = invoice.lastChasedAt.toDate().toISOString();
-  }
-  if (invoice.nextChaseAt instanceof Timestamp) {
-    invoice.nextChaseAt = invoice.nextChaseAt.toDate().toISOString();
-  }
-  if (invoice.updatedAt instanceof Timestamp) {
-    invoice.updatedAt = invoice.updatedAt.toDate().toISOString();
-  }
+  // Convert Timestamp to ISO string if needed (handles Timestamp, string, number, {seconds} objects)
+  const dueDate = toJsDate(invoice.dueAt);
+  if (dueDate) invoice.dueAt = dueDate.toISOString();
+  const createdDate = toJsDate(invoice.createdAt);
+  if (createdDate) invoice.createdAt = createdDate.toISOString();
+  const lastChasedDate = toJsDate(invoice.lastChasedAt);
+  if (lastChasedDate) invoice.lastChasedAt = lastChasedDate.toISOString();
+  const nextChaseDate = toJsDate(invoice.nextChaseAt);
+  if (nextChaseDate) invoice.nextChaseAt = nextChaseDate.toISOString();
+  const updatedDate = toJsDate(invoice.updatedAt);
+  if (updatedDate) invoice.updatedAt = updatedDate.toISOString();
 
   return invoice;
 }
@@ -497,17 +477,11 @@ export function subscribeToInvoice(
         callback(invoice);
       },
       (error: unknown) => {
-        console.error("Error subscribing to invoice:", error);
-        
+        logFirestoreInstrumentation("invoices:subscribeToInvoice", error, {
+          docPath: `businessProfiles/${uid}/invoices/${invoiceId}`,
+        });
         const errorCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : undefined;
         const errorMessage = error instanceof Error ? error.message : String(error);
-        // Dev-only logging for permission errors
-        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-        if (devToolsEnabled && (errorCode === "permission-denied" || errorMessage?.includes("permission"))) {
-          console.log(`[Invoice Detail] Permission denied for invoiceId: ${invoiceId}, error code: ${errorCode}`);
-        }
-        
-        // Check for permission denied error
         if (errorCode === "permission-denied" || errorMessage?.includes("permission") || errorMessage?.includes("insufficient")) {
           callback(null, "Permission denied: You don't have access to this invoice (or it no longer exists).");
         } else {
@@ -518,12 +492,14 @@ export function subscribeToInvoice(
 
     return unsubscribe;
   } catch (error: unknown) {
-    console.error("Error setting up invoice subscription:", error);
-    const errorMessage = error instanceof Error ? error.message : "Failed to set up invoice subscription";
-    callback(null, errorMessage);
+    logFirestoreInstrumentation("invoices:subscribeToInvoice setup", error, {
+      docPath: `businessProfiles/${uid}/invoices/${invoiceId}`,
+    });
+    callback(null, error instanceof Error ? error.message : "Failed to set up invoice subscription");
     return () => {};
   }
 }
+
 
 export async function updateInvoice(
   uid: string,
@@ -782,9 +758,10 @@ export function subscribeToChaseEvents(
           events.push({
             id: doc.id,
             invoiceId: invoiceId,
-            createdAt: data.createdAt instanceof Timestamp
-              ? data.createdAt.toDate().toISOString()
-              : data.createdAt || new Date().toISOString(),
+            createdAt: (() => {
+              const date = toJsDate(data.createdAt);
+              return date ? date.toISOString() : new Date().toISOString();
+            })(),
             toEmail: data.originalTo || data.to || "",
             type: data.type === "invoice_initial" || data.type === "invoice_reminder" || data.type === "invoice_due" || data.type === "invoice_late_weekly"
               ? "reminder"
@@ -795,15 +772,12 @@ export function subscribeToChaseEvents(
         callback(events);
       },
       (error: unknown) => {
-        // Handle permission errors gracefully
+        logFirestoreInstrumentation("invoices:subscribeToChaseEvents", error, { queryPath: "emailEvents" });
         const errorCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : undefined;
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (errorCode === "permission-denied" || errorMessage?.includes("Missing or insufficient permissions")) {
-          console.warn("Permission denied for chase events - showing empty list:", error);
-          // Return empty array instead of error to prevent page crash
           callback([]);
         } else {
-          console.error("Error subscribing to chase events:", error);
           callback([], errorMessage || "Failed to load chase events");
         }
       }
@@ -811,12 +785,10 @@ export function subscribeToChaseEvents(
 
     return unsubscribe;
   } catch (error: unknown) {
-    console.error("Error setting up chase events subscription:", error);
+    logFirestoreInstrumentation("invoices:subscribeToChaseEvents setup", error, { queryPath: "emailEvents" });
     const errMsg = error instanceof Error ? error.message : String(error);
     const errCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : undefined;
-    // Handle permission errors gracefully
     if (errCode === "permission-denied" || errMsg?.includes("Missing or insufficient permissions")) {
-      console.warn("Permission denied for chase events - showing empty list");
       callback([]);
     } else {
       callback([], errMsg || "Failed to set up chase events subscription");

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
+import { toJsDate } from "@/lib/dates";
 import { User } from "firebase/auth";
 
 export default function InvoicesPage() {
@@ -29,6 +30,9 @@ export default function InvoicesPage() {
   const [allInvoices, setAllInvoices] = useState<FirestoreInvoice[]>([]);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | undefined>(undefined);
   const [hasMore, setHasMore] = useState(false);
+  const [invoiceLoadError, setInvoiceLoadError] = useState<string | null>(null);
+  const [realtimePaused, setRealtimePaused] = useState(false);
+  const [invoiceRetryCount, setInvoiceRetryCount] = useState(0);
   const invoiceUnsubscribeRef = useRef<(() => void) | null>(null);
   const didRedirectRef = useRef<boolean>(false);
   const { showToast, ToastComponent } = useToast();
@@ -62,39 +66,63 @@ export default function InvoicesPage() {
   useEffect(() => {
     if (!user) return;
 
+    let mounted = true;
     setLoading(true);
     setAllInvoices([]);
-    
-    // Clean up previous subscription
+    setInvoiceLoadError(null);
+    setRealtimePaused(false);
+
     if (invoiceUnsubscribeRef.current) {
       invoiceUnsubscribeRef.current();
+      invoiceUnsubscribeRef.current = null;
     }
 
-    // Set up real-time subscription - ALWAYS includes userId filter
-    // This subscription automatically updates when invoices change in Firestore
-    // (e.g., when an invoice is marked as paid via the API endpoint)
-    const unsubscribe = subscribeToUserInvoices(user, (result: InvoiceSubscriptionResult) => {
-      if (result.error) {
-        console.error("Error loading invoices:", result.error);
+    (async () => {
+      try {
+        const idToken = await user.getIdToken();
+        const listRes = await fetch("/api/invoices", { headers: { Authorization: `Bearer ${idToken}` } });
+        const listData = (await listRes.json().catch(() => ({}))) as { invoices?: FirestoreInvoice[]; error?: string; message?: string };
+        if (!mounted) return;
+        if (!listRes.ok) {
+          if (listRes.status === 401) {
+            router.replace("/login?redirect=" + encodeURIComponent("/invoices"));
+            return;
+          }
+          setInvoiceLoadError(listData.message || listData.error || "Could not load invoices.");
+          setLoading(false);
+          return;
+        }
+        const initialInvoices = Array.isArray(listData.invoices) ? listData.invoices : [];
+        setAllInvoices(initialInvoices);
+        setLoading(false);
+      } catch (e) {
+        if (!mounted) return;
+        setInvoiceLoadError(e instanceof Error ? e.message : "Could not load invoices.");
         setLoading(false);
         return;
       }
-      
-      // Update invoices - filteredInvoices will automatically recalculate via useMemo
-      // Paid invoices will be filtered out if statusFilter === "pending"
-      // Paid invoices will show with "Paid" badge if statusFilter !== "pending"
-      setAllInvoices(result.invoices || []);
-      setLastDoc(result.lastDoc);
-      setHasMore(result.hasMore || false);
-      setLoading(false);
-    }, 25); // Limit to 25 invoices initially
 
-    invoiceUnsubscribeRef.current = unsubscribe;
+      const unsubscribe = subscribeToUserInvoices(user, (result: InvoiceSubscriptionResult) => {
+        if (result.error || result.indexError) {
+          setRealtimePaused(true);
+          return;
+        }
+        setRealtimePaused(false);
+        setAllInvoices(result.invoices || []);
+        setLastDoc(result.lastDoc);
+        setHasMore(result.hasMore || false);
+      }, 25);
+      invoiceUnsubscribeRef.current = unsubscribe;
+    })();
 
     return () => {
-      unsubscribe();
+      mounted = false;
+      if (invoiceUnsubscribeRef.current) {
+        invoiceUnsubscribeRef.current();
+        invoiceUnsubscribeRef.current = null;
+      }
     };
-  }, [user]);
+  }, [user, router, invoiceRetryCount]);
 
   // Filter invoices client-side (since we already have userId filter from query)
   const filteredInvoices = useMemo(() => {
@@ -121,7 +149,7 @@ export default function InvoicesPage() {
       filtered = filtered.filter(inv => {
         if (statusFilter === "overdue") {
           // Compute overdue: dueAt < now AND status != "paid"
-          const dueDate = typeof inv.dueAt === "string" ? new Date(inv.dueAt) : inv.dueAt.toDate();
+          const dueDate = toJsDate(inv.dueAt) || new Date();
           return inv.status !== "paid" && dueDate < now;
         }
         return inv.status === statusFilter;
@@ -227,6 +255,29 @@ export default function InvoicesPage() {
       </Header>
       <div className="flex-1 overflow-auto p-6">
         <div className="space-y-4">
+          {invoiceLoadError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between">
+              <p className="text-red-800">{invoiceLoadError}</p>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setInvoiceLoadError(null);
+                  setLoading(true);
+                  setInvoiceRetryCount((c) => c + 1);
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          )}
+          {realtimePaused && !invoiceLoadError && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-800">
+              Live updates paused. Displaying last loaded data. Reconnect or refresh to retry.
+            </div>
+          )}
+          {!invoiceLoadError && (
+          <>
           {/* Filters */}
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -331,9 +382,7 @@ export default function InvoicesPage() {
                   ) : (
                     filteredInvoices.map((invoice) => {
                       const isPaid = invoice.status === "paid" || !!invoice.paidAt;
-                      const paidDate = invoice.paidAt 
-                        ? (typeof invoice.paidAt === "string" ? new Date(invoice.paidAt) : invoice.paidAt.toDate())
-                        : null;
+                      const paidDate = invoice.paidAt ? toJsDate(invoice.paidAt) : null;
                       return (
                         <tr
                           key={invoice.id}
@@ -358,7 +407,10 @@ export default function InvoicesPage() {
                             </div>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <DateLabel date={typeof invoice.dueAt === "string" ? invoice.dueAt : invoice.dueAt.toDate().toISOString()} />
+                            <DateLabel date={(() => {
+                              const date = toJsDate(invoice.dueAt);
+                              return date ? date.toISOString() : new Date().toISOString();
+                            })()} />
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             {isPaid ? (
@@ -375,7 +427,10 @@ export default function InvoicesPage() {
                             {isPaid ? (
                               <span className="text-gray-400">—</span>
                             ) : invoice.nextChaseAt ? (
-                              <DateLabel date={typeof invoice.nextChaseAt === "string" ? invoice.nextChaseAt : invoice.nextChaseAt.toDate().toISOString()} />
+                              <DateLabel date={(() => {
+                                const date = toJsDate(invoice.nextChaseAt);
+                                return date ? date.toISOString() : new Date().toISOString();
+                              })()} />
                             ) : (
                               <span className="text-gray-400">—</span>
                             )}
@@ -427,6 +482,8 @@ export default function InvoicesPage() {
             </>
             )}
           </div>
+          </>
+          )}
         </div>
       </div>
       {ToastComponent}

@@ -5,7 +5,7 @@ import { useRouter, useParams, useSearchParams, usePathname } from "next/navigat
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
-import { dateInputToTimestamp, timestampToDateInput } from "@/lib/dates";
+import { dateInputToTimestamp, timestampToDateInput, toJsDate } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -47,7 +47,10 @@ export default function InvoiceDetailPage() {
   const { isPro } = useEntitlements();
   const [user, setUser] = useState<User | null>(null);
   const [isDev, setIsDev] = useState(false);
+  const [realtimePaused, setRealtimePaused] = useState(false);
   const didRedirectRef = useRef<boolean>(false);
+  const mountedRef = useRef(true);
+  const invoiceDetailSubsRef = useRef<{ invoice: () => void; chase: () => void } | null>(null);
   const { showToast, ToastComponent } = useToast();
 
   const [formData, setFormData] = useState<{
@@ -71,110 +74,134 @@ export default function InvoiceDetailPage() {
   });
 
   useEffect(() => {
-    // Check Firebase availability first
     if (firebaseUnavailable || !auth) {
       setLoading(false);
       return;
     }
+    mountedRef.current = true;
 
-    // Check if dev tools are enabled
     const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1" || process.env.NODE_ENV !== "production";
     setIsDev(devToolsEnabled);
 
     const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) {
-        // Only redirect once
         if (!didRedirectRef.current) {
           didRedirectRef.current = true;
-          const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
-          if (devToolsEnabled) {
+          if (process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
             console.log("[NAV DEBUG] router.push('/login')", { currentPathname: pathname, targetPathname: "/login", condition: "No authenticated user (invoice detail page)" });
           }
           router.push("/login");
         }
         return;
       }
+      const prev = invoiceDetailSubsRef.current;
+      invoiceDetailSubsRef.current = null;
+      if (prev) {
+        prev.invoice();
+        prev.chase();
+      }
       setUser(currentUser);
-
-      // Subscribe to invoice
       setLoading(true);
-      let chaseEventsUnsubscribe: (() => void) | null = null;
-      
-      const invoiceUnsubscribe = subscribeToInvoice(currentUser.uid, invoiceId, (invoiceData, error) => {
-        if (error) {
-          console.error("Invoice subscription error:", error);
+      setError(null);
+      setRealtimePaused(false);
+      let chaseUnsub: (() => void) | null = null;
+      let invoiceUnsub: (() => void) | null = null;
+
+      const applyInvoice = (inv: FirestoreInvoice) => {
+        const dueDate = inv.dueAt ? timestampToDateInput(inv.dueAt) : "";
+        setFormData({
+          customerName: inv.customerName || "",
+          customerEmail: inv.customerEmail || "",
+          amount: ((inv.amount || 0) / 100).toFixed(2),
+          dueDate,
+          status: inv.status,
+          autoChaseEnabled: inv.autoChaseEnabled || false,
+          autoChaseDays: (inv.autoChaseDays as AutoChaseDays) || 3,
+          maxChases: inv.maxChases || 3,
+        });
+        if (shouldStartEditing) setIsEditing(true);
+      };
+
+      (async () => {
+        try {
+          const idToken = await currentUser.getIdToken();
+          const res = await fetch(`/api/invoices/${invoiceId}`, { headers: { Authorization: `Bearer ${idToken}` } });
+          const data = (await res.json().catch(() => ({}))) as { invoice?: FirestoreInvoice; error?: string; message?: string };
+          if (!mountedRef.current) return;
+          if (!res.ok) {
+            if (res.status === 401) {
+              router.replace("/login?redirect=" + encodeURIComponent("/invoices/" + invoiceId));
+              return;
+            }
+            if (res.status === 404) {
+              setError("Invoice not found.");
+              setInvoice(null);
+              setLoading(false);
+              return;
+            }
+            setError(data.message || data.error || "Failed to load invoice.");
+            setInvoice(null);
+            setLoading(false);
+            return;
+          }
+          const inv = data.invoice;
+          if (!inv) {
+            setError("Invalid response.");
+            setLoading(false);
+            return;
+          }
+          setInvoice(inv);
+          applyInvoice(inv);
           setLoading(false);
+        } catch (e) {
+          if (!mountedRef.current) return;
+          setError(e instanceof Error ? e.message : "Failed to load invoice.");
           setInvoice(null);
-          setChaseEvents([]);
-          setError(error);
-          // Don't attempt chaseEvents subscription if invoice subscription fails
+          setLoading(false);
           return;
         }
-        
-        // Clear error on success
-        setError(null);
+        if (!mountedRef.current) return;
 
-        if (invoiceData) {
-          setInvoice(invoiceData);
-          
-          // Update form data when invoice loads or changes
-          const dueDate = invoiceData.dueAt 
-            ? timestampToDateInput(
-                typeof invoiceData.dueAt === "string" 
-                  ? invoiceData.dueAt 
-                  : invoiceData.dueAt
-              )
-            : "";
-          
-          setFormData({
-            customerName: invoiceData.customerName || "",
-            customerEmail: invoiceData.customerEmail || "",
-            amount: ((invoiceData.amount || 0) / 100).toFixed(2),
-            dueDate: dueDate,
-            status: invoiceData.status,
-            autoChaseEnabled: invoiceData.autoChaseEnabled || false,
-            autoChaseDays: (invoiceData.autoChaseDays as AutoChaseDays) || 3,
-            maxChases: invoiceData.maxChases || 3,
-          });
-          setLoading(false);
-          
-          // Start in edit mode if requested via query parameter
-          if (shouldStartEditing) {
-            setIsEditing(true);
+        chaseUnsub = subscribeToChaseEvents(invoiceId, (events, evErr) => {
+          if (evErr) {
+            if (evErr.includes("permission") || evErr.includes("Permission")) {
+              setChaseEventsError("Unable to load email history. You may not have permission to view this data.");
+            } else {
+              setChaseEventsError(null);
+            }
+            setChaseEvents([]);
+            return;
           }
-          
-          // Only subscribe to chase events if invoice subscription succeeded
-          // This prevents permission errors from propagating
-          if (!chaseEventsUnsubscribe) {
-            chaseEventsUnsubscribe = subscribeToChaseEvents(invoiceId, (events, error) => {
-              if (error) {
-                console.error("Chase events subscription error:", error);
-                // Show non-fatal error message for permission issues
-                if (error.includes("permission") || error.includes("Permission")) {
-                  setChaseEventsError("Unable to load email history. You may not have permission to view this data.");
-                } else {
-                  setChaseEventsError(null); // Clear error for other types
-                }
-                setChaseEvents([]);
-                return;
-              }
-              setChaseEventsError(null); // Clear error on success
-              setChaseEvents(events);
-            });
-          }
-        }
-      });
+          setChaseEventsError(null);
+          setChaseEvents(events);
+        });
 
-      return () => {
-        invoiceUnsubscribe();
-        if (chaseEventsUnsubscribe) {
-          chaseEventsUnsubscribe();
+        invoiceUnsub = subscribeToInvoice(currentUser.uid, invoiceId, (invoiceData, subErr) => {
+          if (subErr) {
+            setRealtimePaused(true);
+            return;
+          }
+          setRealtimePaused(false);
+          if (invoiceData) {
+            setInvoice(invoiceData);
+            applyInvoice(invoiceData);
+          }
+        });
+        if (invoiceUnsub && chaseUnsub) {
+          invoiceDetailSubsRef.current = { invoice: invoiceUnsub, chase: chaseUnsub };
         }
-      };
+      })();
     });
 
     return () => {
+      mountedRef.current = false;
       authUnsubscribe();
+      const subs = invoiceDetailSubsRef.current;
+      invoiceDetailSubsRef.current = null;
+      if (subs) {
+        subs.invoice();
+        subs.chase();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only depend on invoiceId to avoid re-subscribing
   }, [invoiceId]);
@@ -351,13 +378,8 @@ export default function InvoiceDetailPage() {
   // MUST be called before any conditional returns to maintain hooks order
   const dueDateForDisplay = useMemo(() => {
     if (!invoice?.dueAt) return new Date();
-    if (typeof invoice.dueAt === "string") {
-      return new Date(invoice.dueAt);
-    }
-    if (invoice.dueAt?.toDate) {
-      return invoice.dueAt.toDate();
-    }
-    return new Date();
+    const date = toJsDate(invoice.dueAt);
+    return date || new Date();
   }, [invoice?.dueAt]);
 
   if (loading) {
@@ -423,6 +445,11 @@ export default function InvoiceDetailPage() {
       <Header title="Invoice Details" />
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-4xl space-y-6">
+          {realtimePaused && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-800">
+              Live updates paused. Displaying last loaded data. Reconnect or refresh to retry.
+            </div>
+          )}
           {/* Breadcrumb/Back Link */}
           <div>
             <button
@@ -461,13 +488,7 @@ export default function InvoiceDetailPage() {
                         <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Paid on</div>
                         <div className="text-sm font-semibold text-green-600">
                           <DateLabel 
-                            date={
-                              invoice.paidAt
-                                ? (typeof invoice.paidAt === "string" 
-                                    ? new Date(invoice.paidAt) 
-                                    : invoice.paidAt.toDate())
-                                : new Date()
-                            } 
+                            date={invoice.paidAt ? (toJsDate(invoice.paidAt) || new Date()) : new Date()} 
                           />
                         </div>
                       </div>
@@ -536,11 +557,10 @@ export default function InvoiceDetailPage() {
                       setIsEditing(false);
                       setErrors({});
                       // Reset form data to invoice values
-                      const dueDate = typeof invoice.dueAt === "string" 
-                        ? new Date(invoice.dueAt).toISOString().split("T")[0]
-                        : invoice.dueAt?.toDate?.() 
-                          ? new Date(invoice.dueAt.toDate()).toISOString().split("T")[0]
-                          : "";
+                      const dueDate = (() => {
+                        const date = toJsDate(invoice.dueAt);
+                        return date ? date.toISOString().split("T")[0] : "";
+                      })();
                       setFormData({
                         customerName: invoice.customerName || "",
                         customerEmail: invoice.customerEmail || "",
@@ -764,9 +784,7 @@ export default function InvoiceDetailPage() {
                   <div className="text-sm text-gray-500">Created At</div>
                   <div className="font-medium text-gray-900">
                     <DateLabel 
-                      date={typeof invoice.createdAt === "string" 
-                        ? new Date(invoice.createdAt) 
-                        : invoice.createdAt?.toDate?.() || new Date()} 
+                      date={toJsDate(invoice.createdAt) || new Date()} 
                       showTime 
                     />
                   </div>
@@ -835,7 +853,7 @@ export default function InvoiceDetailPage() {
                         <div className="text-sm text-gray-500">Last Chased</div>
                         <div className="text-sm font-medium text-gray-900">
                           {invoice.lastChasedAt ? (
-                            <DateLabel date={typeof invoice.lastChasedAt === "string" ? new Date(invoice.lastChasedAt) : invoice.lastChasedAt?.toDate?.() || new Date()} showTime />
+                            <DateLabel date={toJsDate(invoice.lastChasedAt) || new Date()} showTime />
                           ) : (
                             <span className="text-gray-400">Never</span>
                           )}
@@ -845,7 +863,7 @@ export default function InvoiceDetailPage() {
                         <div className="text-sm text-gray-500">Next Chase</div>
                         <div className="text-sm font-medium text-gray-900">
                           {invoice.nextChaseAt ? (
-                            <DateLabel date={typeof invoice.nextChaseAt === "string" ? new Date(invoice.nextChaseAt) : invoice.nextChaseAt?.toDate?.() || new Date()} showTime />
+                            <DateLabel date={toJsDate(invoice.nextChaseAt) || new Date()} showTime />
                           ) : (
                             <span className="text-gray-400">—</span>
                           )}

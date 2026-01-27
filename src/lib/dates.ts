@@ -6,6 +6,86 @@ import { Timestamp } from "firebase/firestore";
  */
 
 /**
+ * Convert various date formats to JavaScript Date | null.
+ * Handles:
+ * - Firestore Timestamp (has toDate method)
+ * - ISO string
+ * - Number (milliseconds timestamp)
+ * - Object with {seconds, nanoseconds} from API serialization
+ * - null/undefined
+ */
+export function toJsDate(value: unknown): Date | null {
+  if (!value) return null;
+
+  // Firestore Timestamp or object with toDate method
+  if (typeof value === "object" && value !== null && "toDate" in value && typeof (value as { toDate: () => Date }).toDate === "function") {
+    try {
+      return (value as { toDate: () => Date }).toDate();
+    } catch {
+      return null;
+    }
+  }
+
+  // ISO string
+  if (typeof value === "string") {
+    const date = new Date(value);
+    return isNaN(date.getTime()) ? null : date;
+  }
+
+  // Number (milliseconds timestamp)
+  if (typeof value === "number") {
+    const date = new Date(value);
+    return isNaN(date.getTime()) ? null : date;
+  }
+
+  // Object with seconds property (API serialization: {seconds: number, nanoseconds?: number})
+  if (typeof value === "object" && value !== null && "seconds" in value) {
+    const seconds = typeof (value as { seconds: unknown }).seconds === "number" ? (value as { seconds: number }).seconds : null;
+    if (seconds !== null) {
+      const date = new Date(seconds * 1000);
+      return isNaN(date.getTime()) ? null : date;
+    }
+  }
+
+  return null;
+}
+
+// Inline unit tests (run in dev mode)
+if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+  const testToJsDate = () => {
+    const now = new Date();
+    const nowMs = now.getTime();
+    const nowIso = now.toISOString();
+    const nowSeconds = Math.floor(nowMs / 1000);
+
+    // Test Firestore Timestamp
+    const ts = Timestamp.fromDate(now);
+    console.assert(toJsDate(ts)?.getTime() === nowMs, "toJsDate: Firestore Timestamp");
+
+    // Test ISO string
+    console.assert(toJsDate(nowIso)?.getTime() === nowMs, "toJsDate: ISO string");
+
+    // Test number
+    console.assert(toJsDate(nowMs)?.getTime() === nowMs, "toJsDate: number");
+
+    // Test {seconds, nanoseconds} object
+    console.assert(toJsDate({ seconds: nowSeconds, nanoseconds: 0 })?.getTime() === nowMs, "toJsDate: {seconds, nanoseconds}");
+
+    // Test null/undefined
+    console.assert(toJsDate(null) === null, "toJsDate: null");
+    console.assert(toJsDate(undefined) === null, "toJsDate: undefined");
+
+    // Test invalid
+    console.assert(toJsDate("invalid") === null, "toJsDate: invalid string");
+    console.assert(toJsDate(NaN) === null, "toJsDate: NaN");
+
+    console.log("[toJsDate] All tests passed");
+  };
+  // Run tests after a short delay to ensure Timestamp is available
+  setTimeout(testToJsDate, 100);
+}
+
+/**
  * Convert a date input string (YYYY-MM-DD) to a Firestore Timestamp
  * Uses local noon to avoid timezone issues
  */

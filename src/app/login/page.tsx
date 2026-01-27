@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
 import { isValidEmail } from "@/lib/utils";
-import { getBusinessProfile } from "@/lib/businessProfile";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -81,32 +80,38 @@ export default function LoginPage() {
         throw new Error("Failed to create session");
       }
 
-      // Check if user has completed company profile onboarding
-      // ONLY redirect if we're on the login page
+      // Check if user has completed company profile onboarding via server API (no client Firestore)
       if (pathname === "/login") {
         const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
         try {
-          const profile = await getBusinessProfile(userCredential.user.uid);
-          if (!profile) {
-            // Redirect to onboarding if profile is missing
+          const profileRes = await fetch("/api/business-profile", {
+            headers: { Authorization: `Bearer ${idToken}` },
+          });
+          const profileData = (await profileRes.json().catch(() => ({}))) as { exists?: boolean; error?: string; message?: string };
+          if (!profileRes.ok) {
+            console.error("Failed to check business profile:", profileRes.status, profileData.message ?? profileData.error);
             if (devToolsEnabled) {
-              console.log("[redirect->dashboard]", { pathname, reason: "No profile, redirecting to onboarding instead" });
+              console.log("[redirect->dashboard]", { pathname, reason: "Profile API error, defaulting to dashboard" });
+            }
+            router.replace("/dashboard");
+            router.refresh();
+            return;
+          }
+          if (!profileData.exists) {
+            if (devToolsEnabled) {
+              console.log("[redirect->onboarding]", { pathname, reason: "No profile, redirecting to onboarding" });
             }
             router.replace("/onboarding/company");
           } else {
-            // Redirect to dashboard if profile exists
             if (devToolsEnabled) {
               console.log("[redirect->dashboard]", { pathname, reason: "Post-login redirect, profile exists" });
-              console.trace("redirect->dashboard trace");
             }
             router.replace("/dashboard");
           }
         } catch (profileError) {
-          // If profile check fails, still redirect to dashboard
           console.error("Failed to check business profile:", profileError);
           if (devToolsEnabled) {
             console.log("[redirect->dashboard]", { pathname, reason: "Profile check failed, defaulting to dashboard" });
-            console.trace("redirect->dashboard trace");
           }
           router.replace("/dashboard");
         }
