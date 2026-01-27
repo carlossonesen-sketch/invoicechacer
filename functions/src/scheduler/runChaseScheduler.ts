@@ -146,8 +146,9 @@ export async function runChaseSchedulerLogic(): Promise<void> {
       const invoiceRef = doc.ref;
       const uid = invoiceRef.parent?.parent?.id ?? data.userId ?? "";
       const invoiceId = doc.id;
+      // Specific invoice path; no collectionGroup("chaseEvents") to avoid index errors.
       const chaseEventsRef = db
-        .collection("businessProfiles")
+        .collection("users")
         .doc(uid)
         .collection("invoices")
         .doc(invoiceId)
