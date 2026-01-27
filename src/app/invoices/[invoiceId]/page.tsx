@@ -260,11 +260,18 @@ export default function InvoiceDetailPage() {
         return;
       }
       
+      const dueDate = toJsDate(dueTimestamp);
+      if (!dueDate) {
+        setErrors({ dueDate: "Invalid due date" });
+        setSaving(false);
+        return;
+      }
+      
       await updateInvoice(user.uid, invoice.id, {
         customerName: formData.customerName.trim(),
         customerEmail: formData.customerEmail.trim(),
         amount: amountCents,
-        dueAt: dueTimestamp.toDate().toISOString(),
+        dueAt: dueDate.toISOString(),
         status: formData.status,
         autoChaseEnabled: formData.autoChaseEnabled && isPro,
         autoChaseDays: formData.autoChaseDays,

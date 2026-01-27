@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { createInvoice } from "@/lib/invoices";
-import { dateInputToTimestamp } from "@/lib/dates";
+import { dateInputToTimestamp, toJsDate } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -139,11 +139,18 @@ export default function NewInvoicePage() {
         return;
       }
       
+      const dueDate = toJsDate(dueTimestamp);
+      if (!dueDate) {
+        setErrors({ dueDate: "Invalid due date" });
+        setLoading(false);
+        return;
+      }
+      
       const invoiceId = await createInvoice(user, {
         customerName: formData.customerName.trim(),
         customerEmail: formData.customerEmail.trim(),
         amount: amountCents,
-        dueAt: dueTimestamp.toDate().toISOString(),
+        dueAt: dueDate.toISOString(),
         status: formData.status,
         notes: formData.notes.trim() || undefined,
         paymentLink: formData.paymentLink.trim() || undefined,

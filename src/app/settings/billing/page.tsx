@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
+import { toJsDate } from "@/lib/dates";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
@@ -113,14 +114,7 @@ export default function BillingPage() {
             setSubscriptionStatus(typeof data?.subscriptionStatus === "string" ? data.subscriptionStatus : null);
             setStripeCustomerId(typeof data?.stripeCustomerId === "string" ? data.stripeCustomerId : null);
             const te = data?.trialEndsAt;
-            let parsed: Date | null = null;
-            if (te?.toDate) {
-              parsed = te.toDate();
-            } else if (te && typeof te.seconds === "number") {
-              parsed = new Date(te.seconds * 1000);
-            } else if (typeof te === "string") {
-              parsed = new Date(te);
-            }
+            const parsed = toJsDate(te);
             setTrialEndsAt(parsed && !isNaN(parsed.getTime()) ? parsed : null);
           }
         } catch (error) {
