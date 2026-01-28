@@ -323,6 +323,10 @@ export default function InvoiceDetailPage() {
       showToast("Please add a customer email address first", "error");
       return;
     }
+    if (!invoice?.id) {
+      showToast("Missing invoice id", "error");
+      return;
+    }
 
     setSendingEmail(true);
     setSuccessMessage("");
@@ -339,10 +343,20 @@ export default function InvoiceDetailPage() {
         body: JSON.stringify({ invoiceId: invoice.id }),
       });
 
-      const data = (await response.json().catch(() => ({}))) as { error?: string; message?: string; alreadySent?: boolean; redirectTo?: string };
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+        message?: string;
+        alreadySent?: boolean;
+        redirectTo?: string;
+      };
 
       if (!response.ok) {
-        if (data.alreadySent) {
+        if (response.status === 400) {
+          const msg = [data.message, data.code, data.error].filter(Boolean).join(" — ") || "Invalid request.";
+          showToast(msg, "error");
+          setErrors({ submit: msg });
+        } else if (data.alreadySent) {
           showToast("Initial invoice email was already sent", "info");
         } else if (response.status === 401) {
           router.replace("/login?redirect=" + encodeURIComponent("/invoices/" + invoice.id));

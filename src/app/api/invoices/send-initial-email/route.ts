@@ -35,12 +35,21 @@ export async function POST(request: NextRequest) {
   try {
     initFirebaseAdmin();
 
-    const body = await request.json();
-    const { invoiceId } = body;
-
-    if (!invoiceId || typeof invoiceId !== "string") {
+    let body: { invoiceId?: unknown };
+    try {
+      body = await request.json();
+    } catch {
+      console.warn("[SEND INITIAL EMAIL] MISSING_INVOICE_ID — invalid or missing JSON body");
       return NextResponse.json(
-        { error: "invoiceId is required" },
+        { error: "BAD_REQUEST", code: "MISSING_INVOICE_ID", message: "invoiceId is required" },
+        { status: 400 }
+      );
+    }
+    const invoiceId = typeof body?.invoiceId === "string" ? body.invoiceId : undefined;
+    if (!invoiceId || invoiceId.trim() === "") {
+      console.warn("[SEND INITIAL EMAIL] MISSING_INVOICE_ID — received body (not in response):", JSON.stringify(body));
+      return NextResponse.json(
+        { error: "BAD_REQUEST", code: "MISSING_INVOICE_ID", message: "invoiceId is required" },
         { status: 400 }
       );
     }
