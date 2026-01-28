@@ -773,25 +773,41 @@ export function subscribeToChaseEvents(
         callback(events);
       },
       (error: unknown) => {
-        logFirestoreInstrumentation("invoices:subscribeToChaseEvents", error, { queryPath: "emailEvents" });
         const errorCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : undefined;
         const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorCode === "permission-denied" || errorMessage?.includes("Missing or insufficient permissions")) {
+        const isPermissionOrAuth =
+          errorCode === "permission-denied" ||
+          errorCode === "unauthenticated" ||
+          errorMessage?.includes("Missing or insufficient permissions");
+
+        if (isPermissionOrAuth) {
+          unsubscribe();
           callback([]);
-        } else {
-          callback([], errorMessage || "Failed to load chase events");
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[chaseEvents] permission-denied or unauthenticated, unsubscribed (silent)");
+          }
+          return;
         }
+        logFirestoreInstrumentation("invoices:subscribeToChaseEvents", error, { queryPath: "emailEvents" });
+        callback([], errorMessage || "Failed to load chase events");
       }
     );
 
     return unsubscribe;
   } catch (error: unknown) {
-    logFirestoreInstrumentation("invoices:subscribeToChaseEvents setup", error, { queryPath: "emailEvents" });
     const errMsg = error instanceof Error ? error.message : String(error);
     const errCode = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : undefined;
-    if (errCode === "permission-denied" || errMsg?.includes("Missing or insufficient permissions")) {
+    const isPermissionOrAuth =
+      errCode === "permission-denied" ||
+      errCode === "unauthenticated" ||
+      errMsg?.includes("Missing or insufficient permissions");
+    if (isPermissionOrAuth) {
       callback([]);
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[chaseEvents] setup permission-denied or unauthenticated (silent)");
+      }
     } else {
+      logFirestoreInstrumentation("invoices:subscribeToChaseEvents setup", error, { queryPath: "emailEvents" });
       callback([], errMsg || "Failed to set up chase events subscription");
     }
     return () => {};

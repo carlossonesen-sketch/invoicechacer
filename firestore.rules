@@ -19,6 +19,11 @@ service cloud.firestore {
     // Invoices: canonical path businessProfiles/{uid}/invoices/{invoiceId}
     match /businessProfiles/{uid}/invoices/{invoiceId} {
       allow read, write: if signedIn() && request.auth.uid == uid;
+      // Chase events (read-only for owner; server/admin writes only)
+      match /chaseEvents/{eventId} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow create, update, delete: if false;
+      }
     }
 
     // /invoices/{invoiceId}: read/list/get if request.auth != null && resource.data.userId == request.auth.uid;

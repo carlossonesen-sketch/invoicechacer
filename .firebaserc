@@ -1,6 +1,7 @@
 {
   "projects": {
-    "default": "invoicechaser-crsac"
+    "default": "invoicechaser-crsac",
+    "production": "invoicechaser-crsac"
   },
   "targets": {
     "invoicechaser-crsac": {
@@ -10,5 +11,6 @@
         ]
       }
     }
-  }
+  },
+  "etags": {}
 }
