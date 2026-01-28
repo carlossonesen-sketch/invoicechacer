@@ -159,7 +159,7 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
     }
   }
 
-  // Step 1: Check EMAIL_SENDING_ENABLED - if disabled, log and return early
+  // Step 1: Check EMAIL_SENDING_ENABLED - if disabled, throw 503 error (do not return success)
   if (!config.emailSendingEnabled) {
     if (isProd()) {
       console.log("[EMAIL SENDING DISABLED] Email send blocked by EMAIL_SENDING_ENABLED=false", { invoiceId, type });
@@ -188,7 +188,11 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
     };
 
     await writeEmailEvent(event);
-    return;
+    throw new ApiError(
+      "EMAIL_SENDING_DISABLED",
+      "Email sending is temporarily disabled. Please try again later.",
+      503
+    );
   }
 
   // Step 2: Enforce auto-chase kill switch

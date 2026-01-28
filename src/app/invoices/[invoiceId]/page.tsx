@@ -353,7 +353,11 @@ export default function InvoiceDetailPage() {
       };
 
       if (!response.ok) {
-        if (response.status === 400) {
+        if (response.status === 503 && data.error === "EMAIL_SENDING_DISABLED") {
+          const msg = data.message || "Email sending is temporarily disabled. Please try again later.";
+          showToast(msg, "error");
+          setErrors({ submit: msg });
+        } else if (response.status === 400) {
           const msg = [data.message, data.code, data.error].filter(Boolean).join(" — ") || "Invalid request.";
           showToast(msg, "error");
           setErrors({ submit: msg });
@@ -431,6 +435,12 @@ export default function InvoiceDetailPage() {
         redirectTo?: string;
       };
       if (!response.ok) {
+        if (response.status === 503 && data.error === "EMAIL_SENDING_DISABLED") {
+          const msg = data.message || "Email sending is temporarily disabled. Please try again later.";
+          showToast(msg, "error");
+          setErrors({ submit: msg });
+          return;
+        }
         if (response.status === 403 || response.status === 429) {
           setUpgradeModalMessage(
             data.message || (response.status === 429 ? "Rate limit or cooldown hit. Upgrade for higher limits." : "Trial limit reached. Upgrade for more chase emails.")
