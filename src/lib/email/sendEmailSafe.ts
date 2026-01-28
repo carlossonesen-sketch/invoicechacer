@@ -253,16 +253,21 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
   }
 
   // Step 3: Enforce rate limits (plan-aware, includes per-invoice type caps for trial)
-  await assertEmailLimits({ 
-    userId, 
+  const rateLimitedTypes = [
+    "invoice_initial",
+    "invoice_updated",
+    "invoice_reminder",
+    "invoice_due",
+    "invoice_late_weekly",
+  ] as const;
+  const emailType = rateLimitedTypes.includes(type as (typeof rateLimitedTypes)[number])
+    ? (type as (typeof rateLimitedTypes)[number])
+    : undefined;
+
+  await assertEmailLimits({
+    userId,
     invoiceId,
-    emailType: type as
-      | "invoice_initial"
-      | "invoice_updated"
-      | "invoice_reminder"
-      | "invoice_due"
-      | "invoice_late_weekly"
-      | undefined,
+    emailType,
     weekNumber: metadata?.weekNumber,
   });
 
