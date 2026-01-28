@@ -220,6 +220,9 @@ export default function NewInvoicePage() {
     setSendError(null);
     try {
       const idToken = await user.getIdToken();
+      if (process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+        console.log("create-send -> send-initial-email", { invoiceId: createdInvoiceId });
+      }
       const res = await fetch("/api/invoices/send-initial-email", {
         method: "POST",
         headers: {
@@ -236,6 +239,12 @@ export default function NewInvoicePage() {
         redirectTo?: string;
       };
       if (!res.ok) {
+        if (res.status === 503 && data.error === "EMAIL_SENDING_DISABLED") {
+          const msg = data.message || "Email sending is temporarily disabled. Please try again later.";
+          setSendError(msg);
+          showToast(msg, "error");
+          return;
+        }
         if (res.status === 400 && data.alreadySent) {
           showToast("Email already sent", "info");
           setEmailSent(true);
