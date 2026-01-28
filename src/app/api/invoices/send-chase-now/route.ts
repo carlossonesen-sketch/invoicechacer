@@ -19,6 +19,18 @@ import { getRequestId } from "@/lib/api/requestId";
 
 export const runtime = "nodejs";
 
+function normalizeDueAt(v: unknown): Timestamp | Date | string {
+  if (!v) throw new Error("Invoice dueAt missing");
+  if (v instanceof Timestamp) return v;
+  if (typeof v === "string") return v;
+  if (v instanceof Date) return v;
+  if (typeof v === "object" && v !== null && "toDate" in v && typeof (v as { toDate: unknown }).toDate === "function") {
+    return (v as { toDate: () => Date }).toDate();
+  }
+  if (typeof v === "number") return new Date(v);
+  throw new Error(`Unsupported dueAt type: ${typeof v}`);
+}
+
 try {
   initFirebaseAdmin();
 } catch (error) {
@@ -93,9 +105,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!data.customerEmail || !data.dueAt) {
+    if (!data.customerEmail) {
       return NextResponse.json(
-        { error: "Invoice missing required fields (customerEmail, dueAt)" },
+        { error: "Invoice missing required fields (customerEmail, dueAt)", code: "MISSING_FIELDS" },
+        { status: 400 }
+      );
+    }
+
+    let dueAt: Timestamp | Date | string;
+    try {
+      dueAt = normalizeDueAt(data.dueAt);
+    } catch {
+      return NextResponse.json(
+        { error: "INVALID_DUE_AT", code: "INVALID_DUE_AT", message: "Invoice dueAt is missing or has an unsupported type." },
         { status: 400 }
       );
     }
@@ -104,7 +126,7 @@ export async function POST(request: NextRequest) {
       id: invoiceId,
       userId: businessId || "",
       customerEmail: (data.customerEmail as string) ?? "",
-      dueAt: data.dueAt,
+      dueAt,
       status: (data.status as "pending" | "overdue" | "paid") || "pending",
       paymentLink: (data.paymentLink as string | null) ?? null,
     };
