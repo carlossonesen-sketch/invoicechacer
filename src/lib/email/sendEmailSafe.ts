@@ -195,8 +195,12 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
     );
   }
 
-  // Step 2: Enforce auto-chase kill switch
-  assertAutoChaseAllowed();
+  // Step 2: Enforce auto-chase kill switch (only for chase/reminder; initial send does not require AUTOCHASE_ENABLED)
+  const isChaseOrReminder =
+    type === "invoice_reminder" || type === "invoice_due" || type === "invoice_late_weekly";
+  if (isChaseOrReminder) {
+    assertAutoChaseAllowed();
+  }
 
   // Step 3: Enforce rate limits (plan-aware, includes per-invoice type caps for trial)
   await assertEmailLimits({ 
