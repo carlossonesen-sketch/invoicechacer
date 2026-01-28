@@ -26,7 +26,15 @@ export interface SendEmailParams {
   subject: string;
   html?: string;
   text?: string;
-  type: "invoice" | "chase" | "reminder" | "invoice_initial" | "invoice_reminder" | "invoice_due" | "invoice_late_weekly";
+  type:
+    | "invoice"
+    | "chase"
+    | "reminder"
+    | "invoice_initial"
+    | "invoice_updated"
+    | "invoice_reminder"
+    | "invoice_due"
+    | "invoice_late_weekly";
   metadata?: {
     weekNumber?: number;
     [key: string]: unknown;
@@ -233,10 +241,14 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
     );
   }
 
-  // Step 2: Enforce auto-chase kill switch (only for chase/reminder; initial send does not require AUTOCHASE_ENABLED)
-  const isChaseOrReminder =
-    type === "invoice_reminder" || type === "invoice_due" || type === "invoice_late_weekly";
-  if (isChaseOrReminder) {
+  // Step 2: Enforce auto-chase kill switch
+  // Only scheduled follow-up types require AUTOCHASE_ENABLED.
+  // Manual sends (invoice_initial, invoice_updated) must not be blocked here.
+  const requiresAutoChase =
+    type === "invoice_reminder" ||
+    type === "invoice_due" ||
+    type === "invoice_late_weekly";
+  if (requiresAutoChase) {
     assertAutoChaseAllowed();
   }
 
@@ -244,7 +256,13 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
   await assertEmailLimits({ 
     userId, 
     invoiceId,
-    emailType: type as "invoice_initial" | "invoice_reminder" | "invoice_due" | "invoice_late_weekly" | undefined,
+    emailType: type as
+      | "invoice_initial"
+      | "invoice_updated"
+      | "invoice_reminder"
+      | "invoice_due"
+      | "invoice_late_weekly"
+      | undefined,
     weekNumber: metadata?.weekNumber,
   });
 
