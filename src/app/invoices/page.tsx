@@ -26,7 +26,6 @@ export default function InvoicesPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "overdue" | "paid">("pending");
-  const [showPaid, setShowPaid] = useState(false);
   const [allInvoices, setAllInvoices] = useState<FirestoreInvoice[]>([]);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | undefined>(undefined);
   const [hasMore, setHasMore] = useState(false);
@@ -124,10 +123,9 @@ export default function InvoicesPage() {
         invoiceUnsubscribeRef.current = null;
       }
     };
-    // showPaid in deps: when toggle changes, reset to first page and refetch so list updates (client filter uses same data; refetch avoids stale "load more" cursor)
-  }, [user, router, invoiceRetryCount, showPaid]);
+  }, [user, router, invoiceRetryCount]);
 
-  // Filter invoices client-side (since we already have userId filter from query)
+    // Filter invoices client-side (since we already have userId filter from query)
   const filteredInvoices = useMemo(() => {
     let filtered = allInvoices;
 
@@ -141,10 +139,8 @@ export default function InvoicesPage() {
       );
     }
 
-    // Exclude paid invoices by default unless "Show paid" is enabled; use invoiceIsPaid for consistency
-    if (!showPaid) {
-      filtered = filtered.filter(inv => !invoiceIsPaid(inv));
-    }
+    // Exclude paid invoices by default; use invoiceIsPaid for consistency
+    filtered = filtered.filter(inv => !invoiceIsPaid(inv));
 
     // Apply status filter (including computed overdue)
     if (statusFilter !== "all") {
@@ -160,7 +156,7 @@ export default function InvoicesPage() {
     }
 
     return filtered;
-  }, [allInvoices, search, statusFilter, showPaid]);
+  }, [allInvoices, search, statusFilter]);
 
   const handleLoadMore = useCallback(async () => {
     if (!user || !lastDoc || loadingMore || !hasMore) return;
@@ -310,18 +306,6 @@ export default function InvoicesPage() {
                   <option value="overdue">Overdue</option>
                   <option value="paid">Paid</option>
                 </Select>
-              </div>
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="showPaid"
-                  checked={showPaid}
-                  onChange={(e) => setShowPaid(e.target.checked)}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                />
-                <label htmlFor="showPaid" className="ml-2 block text-sm text-gray-700">
-                  Show paid
-                </label>
               </div>
             </div>
           </div>

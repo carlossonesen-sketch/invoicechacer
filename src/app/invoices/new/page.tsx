@@ -44,6 +44,7 @@ export default function NewInvoicePage() {
     dueDate: string;
     notes: string;
     paymentLink: string;
+    invoiceNumber: string;
     status: "pending" | "overdue" | "paid";
     autoChaseEnabled: boolean;
     autoChaseDays: AutoChaseDays;
@@ -55,6 +56,7 @@ export default function NewInvoicePage() {
     dueDate: "",
     notes: "",
     paymentLink: "",
+    invoiceNumber: "",
     status: "pending",
     autoChaseEnabled: false,
     autoChaseDays: 3,
@@ -159,6 +161,7 @@ export default function NewInvoicePage() {
         status: formData.status,
         notes: formData.notes.trim() || undefined,
         paymentLink: formData.paymentLink.trim() || undefined,
+        invoiceNumber: formData.invoiceNumber.trim() || undefined,
         autoChaseEnabled: formData.autoChaseEnabled && isPro,
         autoChaseDays: formData.autoChaseDays,
         maxChases: formData.maxChases,
@@ -177,6 +180,7 @@ export default function NewInvoicePage() {
         dueDate: "",
         notes: "",
         paymentLink: "",
+        invoiceNumber: "",
         status: "pending",
         autoChaseEnabled: false,
         autoChaseDays: 3,
@@ -304,6 +308,14 @@ export default function NewInvoicePage() {
                 value={formData.customerEmail}
                 onChange={(e) => setFormData({ ...formData, customerEmail: e.target.value })}
                 error={!!errors.customerEmail}
+              />
+            </FormField>
+
+            <FormField label="Invoice Number (optional)" htmlFor="invoiceNumber">
+              <Input
+                id="invoiceNumber"
+                value={formData.invoiceNumber}
+                onChange={(e) => setFormData({ ...formData, invoiceNumber: e.target.value })}
               />
             </FormField>
 

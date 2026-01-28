@@ -65,7 +65,19 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { customerName, customerEmail, amount, dueAt, status, notes, paymentLink, autoChaseEnabled, autoChaseDays, maxChases } = body;
+    const {
+      customerName,
+      customerEmail,
+      amount,
+      dueAt,
+      status,
+      notes,
+      paymentLink,
+      invoiceNumber,
+      autoChaseEnabled,
+      autoChaseDays,
+      maxChases,
+    } = body;
 
     // Validate required fields
 
@@ -158,6 +170,7 @@ export async function POST(request: NextRequest) {
       updatedAt: Timestamp.now(),
       notes: notes?.trim() || null,
       paymentLink: paymentLink?.trim() || null,
+      invoiceNumber: typeof invoiceNumber === "string" && invoiceNumber.trim() ? invoiceNumber.trim() : null,
       autoChaseEnabled: autoChaseEnabled || false,
       autoChaseDays: autoChaseDays || null,
       maxChases: maxChases || null,

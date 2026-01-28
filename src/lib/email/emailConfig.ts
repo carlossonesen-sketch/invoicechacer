@@ -63,9 +63,10 @@ function parseBooleanEnv(value: string | undefined, defaultValue: boolean): bool
 export function getEmailConfig(): EmailConfig {
   return {
     emailSendingEnabled: parseBooleanEnv(process.env.EMAIL_SENDING_ENABLED, false),
-    emailDryRun: parseBooleanEnv(process.env.EMAIL_DRY_RUN, false),
+    // Dry-run defaults to false; true only when env is explicitly "true"
+    emailDryRun: process.env.EMAIL_DRY_RUN === "true",
     autoChaseEnabled: parseBooleanEnv(process.env.AUTOCHASE_ENABLED, false),
-    autoChaseDryRun: parseBooleanEnv(process.env.AUTOCHASE_DRY_RUN, true),
+    autoChaseDryRun: process.env.AUTOCHASE_DRY_RUN === "true",
     maxEmailsPerDayPerUser: parseIntEnv(process.env.MAX_EMAILS_PER_DAY_PER_USER, 25),
     maxEmailsPerDayGlobal: parseIntEnv(process.env.MAX_EMAILS_PER_DAY_GLOBAL, 200),
     emailCooldownMinutes: parseIntEnv(process.env.EMAIL_COOLDOWN_MINUTES, 60),

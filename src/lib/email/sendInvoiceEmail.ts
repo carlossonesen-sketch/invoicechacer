@@ -2,6 +2,7 @@
  * Send invoice email using templates and safe wrapper
  */
 
+import { getAdminFirestore } from "@/lib/firebase-admin";
 import { sendEmailSafe } from "./sendEmailSafe";
 import { renderInvoiceEmail } from "./templates/invoiceTemplates";
 
@@ -28,6 +29,25 @@ export interface SendInvoiceEmailParams {
 export async function sendInvoiceEmail(params: SendInvoiceEmailParams): Promise<void> {
   const { invoice, type, weekNumber } = params;
 
+  // Resolve business profile for personalization (company name)
+  let businessName: string | undefined;
+  try {
+    const db = getAdminFirestore();
+    if (db && invoice.userId) {
+      const snap = await db.collection("businessProfiles").doc(invoice.userId).get();
+      const data = snap.data() as { companyName?: string } | undefined;
+      if (data && typeof data.companyName === "string" && data.companyName.trim()) {
+        businessName = data.companyName.trim();
+      }
+    }
+  } catch (error) {
+    console.error("[sendInvoiceEmail] Failed to load business profile for email", {
+      userId: invoice.userId,
+      invoiceId: invoice.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   // Render email template
   const template = renderInvoiceEmail({
     type,
@@ -39,6 +59,7 @@ export async function sendInvoiceEmail(params: SendInvoiceEmailParams): Promise<
       dueAt: invoice.dueAt,
       paymentLink: invoice.paymentLink,
       invoiceNumber: invoice.invoiceNumber,
+      businessName,
     },
     weekNumber,
   });

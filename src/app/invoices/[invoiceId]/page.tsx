@@ -41,6 +41,7 @@ export default function InvoiceDetailPage() {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [sendingChaseNow, setSendingChaseNow] = useState(false);
   const [isEditing, setIsEditing] = useState(shouldStartEditing);
+  const [justSaved, setJustSaved] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState<string>("");
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -120,6 +121,7 @@ export default function InvoiceDetailPage() {
           autoChaseDays: (inv.autoChaseDays as AutoChaseDays) || 3,
           maxChases: inv.maxChases || 3,
         });
+        setJustSaved(false);
         if (shouldStartEditing) setIsEditing(true);
       };
 
@@ -281,6 +283,7 @@ export default function InvoiceDetailPage() {
 
       setSuccessMessage("Saved");
       setIsEditing(false);
+      setJustSaved(true);
       
       // Refresh to ensure UI updates (fallback if realtime doesn't update immediately)
       router.refresh();
@@ -643,24 +646,6 @@ export default function InvoiceDetailPage() {
                   </p>
                 )}
                 <div className="flex gap-2">
-                {!isEditing && invoice.status !== "paid" && !hasSentAnyEmail && (
-                  <Button 
-                    onClick={handleSendInvoice}
-                    disabled={sendingEmail || !invoice.customerEmail}
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    {sendingEmail ? "Sending..." : "Send to customer"}
-                  </Button>
-                )}
-                {!isEditing && invoice.status !== "paid" && hasSentAnyEmail && (
-                  <Button
-                    variant="secondary"
-                    onClick={handleSendChaseNow}
-                    disabled={sendingChaseNow}
-                  >
-                    {sendingChaseNow ? "Sending..." : "Send now"}
-                  </Button>
-                )}
                 {!isEditing && (
                   <>
                     <MarkPaidButton
@@ -730,7 +715,10 @@ export default function InvoiceDetailPage() {
                   <Input
                     id="customerName"
                     value={formData.customerName}
-                    onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, customerName: e.target.value });
+                      setJustSaved(false);
+                    }}
                     error={!!errors.customerName}
                   />
                 </FormField>
@@ -740,7 +728,10 @@ export default function InvoiceDetailPage() {
                     id="customerEmail"
                     type="email"
                     value={formData.customerEmail}
-                    onChange={(e) => setFormData({ ...formData, customerEmail: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, customerEmail: e.target.value });
+                      setJustSaved(false);
+                    }}
                     error={!!errors.customerEmail}
                   />
                 </FormField>
@@ -753,7 +744,10 @@ export default function InvoiceDetailPage() {
                       step="0.01"
                       min="0.01"
                       value={formData.amount}
-                      onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                      onChange={(e) => {
+                        setFormData({ ...formData, amount: e.target.value });
+                        setJustSaved(false);
+                      }}
                       error={!!errors.amount}
                     />
                   </FormField>
@@ -763,7 +757,10 @@ export default function InvoiceDetailPage() {
                       id="dueDate"
                       type="date"
                       value={formData.dueDate}
-                      onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                      onChange={(e) => {
+                        setFormData({ ...formData, dueDate: e.target.value });
+                        setJustSaved(false);
+                      }}
                       error={!!errors.dueDate}
                     />
                   </FormField>
@@ -773,7 +770,10 @@ export default function InvoiceDetailPage() {
                   <Select
                     id="status"
                     value={formData.status}
-                    onChange={(e) => setFormData({ ...formData, status: e.target.value as "pending" | "overdue" | "paid" })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, status: e.target.value as "pending" | "overdue" | "paid" });
+                      setJustSaved(false);
+                    }}
                   >
                     <option value="pending">Pending</option>
                     <option value="overdue">Overdue</option>
@@ -806,6 +806,7 @@ export default function InvoiceDetailPage() {
                             return;
                           }
                           setFormData({ ...formData, autoChaseEnabled: e.target.checked });
+                          setJustSaved(false);
                         }}
                         className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                       />
@@ -834,7 +835,13 @@ export default function InvoiceDetailPage() {
                         <Select
                           id="autoChaseDays"
                           value={formData.autoChaseDays}
-                          onChange={(e) => setFormData({ ...formData, autoChaseDays: parseInt(e.target.value) as AutoChaseDays })}
+                          onChange={(e) => {
+                            setFormData({
+                              ...formData,
+                              autoChaseDays: parseInt(e.target.value) as AutoChaseDays,
+                            });
+                            setJustSaved(false);
+                          }}
                         >
                           <option value="3">3 days</option>
                           <option value="5">5 days</option>
@@ -848,7 +855,13 @@ export default function InvoiceDetailPage() {
                           type="number"
                           min="0"
                           value={formData.maxChases}
-                          onChange={(e) => setFormData({ ...formData, maxChases: parseInt(e.target.value) || 0 })}
+                          onChange={(e) => {
+                            setFormData({
+                              ...formData,
+                              maxChases: parseInt(e.target.value) || 0,
+                            });
+                            setJustSaved(false);
+                          }}
                           error={!!errors.maxChases}
                         />
                       </FormField>
@@ -880,7 +893,53 @@ export default function InvoiceDetailPage() {
                 </div>
               )}
 
-              <div className="flex gap-4">
+              <div className="flex gap-4 items-center">
+                {justSaved && invoice.status !== "paid" && invoice.customerEmail && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={sendingEmail}
+                    onClick={async () => {
+                      if (!invoice || !user) return;
+                      try {
+                        setSendingEmail(true);
+                        const idToken = await user.getIdToken();
+                        const response = await fetch("/api/invoices/send-manual-email", {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+                          },
+                          body: JSON.stringify({ invoiceId: invoice.id }),
+                        });
+                        const data = (await response.json().catch(() => ({}))) as {
+                          error?: string;
+                          code?: string;
+                          message?: string;
+                        };
+                        if (!response.ok) {
+                          const msg =
+                            data.message ||
+                            data.error ||
+                            "Failed to resend invoice. Please try again.";
+                          showToast(msg, "error");
+                        } else {
+                          showToast("Invoice resent successfully", "success");
+                        }
+                      } catch (error) {
+                        const msg =
+                          error instanceof Error
+                            ? error.message
+                            : "Failed to resend invoice. Please try again.";
+                        showToast(msg, "error");
+                      } finally {
+                        setSendingEmail(false);
+                      }
+                    }}
+                  >
+                    {sendingEmail ? "Resending..." : "Resend invoice"}
+                  </Button>
+                )}
                 <Button type="submit" disabled={saving}>
                   {saving ? "Saving..." : "Save Changes"}
                 </Button>
@@ -890,6 +949,7 @@ export default function InvoiceDetailPage() {
                   onClick={() => {
                     setIsEditing(false);
                     setErrors({});
+                    setJustSaved(false);
                   }}
                   disabled={saving}
                 >

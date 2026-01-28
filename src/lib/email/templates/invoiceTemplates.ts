@@ -11,6 +11,7 @@ export interface InvoiceForEmail {
   dueAt: string | Date; // ISO string or Date
   paymentLink?: string | null;
   invoiceNumber?: string;
+  businessName?: string;
 }
 
 export interface EmailTemplateResult {
@@ -80,8 +81,12 @@ export function renderInvoiceEmail(params: {
   const { type, invoice, weekNumber } = params;
   const amount = formatAmount(invoice.amount);
   const dueDate = formatDueDate(invoice.dueAt);
-  const customerName = invoice.customerName || "Valued Customer";
+  const customerName = invoice.customerName || "Customer";
   const invoiceNumber = invoice.invoiceNumber || invoice.id.slice(0, 8);
+  const businessName =
+    invoice.businessName && invoice.businessName.trim().length > 0
+      ? invoice.businessName.trim()
+      : "Invoice Chaser";
 
   let subject: string;
   let greeting: string;
@@ -147,13 +152,13 @@ export function renderInvoiceEmail(params: {
     </div>
     <p style="margin: 16px 0 0 0; font-size: 16px;">${closing}</p>
     ${paymentLinkHTML}
-    <p style="margin: 32px 0 0 0; font-size: 14px; color: #6b7280;">Best regards,<br>Invoice Chaser</p>
+    <p style="margin: 32px 0 0 0; font-size: 14px; color: #6b7280;">Best regards,<br>${businessName}</p>
   </div>
 </body>
 </html>
   `.trim();
 
-  const text = `
+const text = `
 ${greeting}
 
 ${body}
@@ -166,7 +171,7 @@ Invoice Details:
 ${closing}${paymentLinkText}
 
 Best regards,
-Invoice Chaser
+${businessName}
   `.trim();
 
   return { subject, html, text };

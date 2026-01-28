@@ -292,6 +292,7 @@ export async function createInvoice(
     status: "pending" | "overdue" | "paid";
     notes?: string;
     paymentLink?: string;
+    invoiceNumber?: string;
     autoChaseEnabled?: boolean;
     autoChaseDays?: number;
     maxChases?: number;
@@ -312,6 +313,7 @@ export async function createInvoice(
       status: invoiceData.status,
       notes: invoiceData.notes || undefined,
       paymentLink: invoiceData.paymentLink || undefined,
+      invoiceNumber: invoiceData.invoiceNumber || undefined,
       autoChaseEnabled: invoiceData.autoChaseEnabled ?? false,
       autoChaseDays: invoiceData.autoChaseDays ?? null,
       maxChases: invoiceData.maxChases ?? null,

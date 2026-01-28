@@ -52,54 +52,92 @@ export interface EmailEvent {
 
 const isProd = () => process.env.NODE_ENV === "production";
 
+const getSendEmailUrl = (): string =>
+  process.env.SEND_EMAIL_URL?.trim() || "https://sendemail-mloq42cfoa-uc.a.run.app";
+
 /**
- * Send email via Resend when RESEND_API_KEY is set; otherwise log only.
- * Uses RESEND_FROM or "Invoice Chaser <onboarding@resend.dev>" for testing.
- * When using Resend, both html and text are required (multipart for deliverability).
- * In production, logs avoid PII (no email addresses, userId).
- * Returns Resend message ID on successful send when available.
+ * Send email via Firebase Functions/Cloud Run sendEmail HTTP endpoint.
+ * Vercel never talks to SES directly; all delivery is delegated to the
+ * dedicated sendEmail service.
+ *
+ * Body shape:
+ *   { to, subject, html, text, meta }
+ *
+ * Returns messageId when available.
  */
 async function sendEmailTransport(
   params: { to: string; subject: string; html?: string; text?: string },
   logContext?: { invoiceId: string; type: string }
 ): Promise<string | undefined> {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  const from = process.env.RESEND_FROM?.trim() || "Invoice Chaser <onboarding@resend.dev>";
+  const url = getSendEmailUrl();
 
-  if (apiKey) {
-    if (!params.html || !params.text) {
-      throw new ApiError(
-        "EMAIL_MISSING_HTML_OR_TEXT",
-        "Both html and text parts are required for sending. Check that the template returns both.",
-        500
-      );
-    }
-    const { Resend } = await import("resend");
-    const resend = new Resend(apiKey);
-    const { data, error } = await resend.emails.send({
-      from,
-      to: [params.to],
-      subject: params.subject,
-      html: params.html,
-      text: params.text,
-    });
-    if (error) {
-      throw new ApiError("RESEND_SEND_FAILED", `Resend: ${error.message}`, 502);
-    }
-    return data?.id;
+  if (!params.html && !params.text) {
+    throw new ApiError(
+      "EMAIL_MISSING_HTML_OR_TEXT",
+      "At least one of html or text must be provided for sending.",
+      500
+    );
   }
 
-  if (isProd() && logContext) {
-    console.log("[EMAIL SEND] No RESEND_API_KEY; logging only", logContext);
-  } else {
-    console.log("[EMAIL SEND] No RESEND_API_KEY; logging only", {
-      to: params.to,
-      subject: params.subject,
-      html: params.html ? "[HTML content]" : undefined,
-      text: params.text ? "[Text content]" : undefined,
+  const body = {
+    to: params.to,
+    subject: params.subject,
+    html: params.html,
+    text: params.text,
+    meta: {
+      invoiceId: logContext?.invoiceId,
+      type: logContext?.type,
+    },
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
     });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new ApiError(
+      "EMAIL_HTTP_REQUEST_FAILED",
+      `Failed to call sendEmail endpoint: ${msg}`,
+      502
+    );
   }
-  return undefined;
+
+  let data: any = null;
+  try {
+    data = await response.json();
+  } catch {
+    // Non-JSON response; keep as null and surface generic error if not ok
+  }
+
+  const okFlag = data?.ok;
+  if (!response.ok || okFlag === false) {
+    const errorCode =
+      (typeof data?.error?.code === "string" && data.error.code) || "EMAIL_HTTP_ERROR";
+    const errorMessage =
+      (typeof data?.error?.message === "string" && data.error.message) ||
+      `sendEmail HTTP ${response.status}`;
+    throw new ApiError(errorCode, errorMessage, response.status || 502);
+  }
+
+  const messageId: string | undefined =
+    typeof data?.messageId === "string" ? data.messageId : undefined;
+
+  console.log("[EMAIL PROVIDER] firebase_sendEmail", {
+    provider: "firebase_http",
+    invoiceId: logContext?.invoiceId,
+    type: logContext?.type,
+    to: params.to,
+    url,
+    messageId: messageId ?? undefined,
+  });
+
+  return messageId;
 }
 
 /**

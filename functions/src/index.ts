@@ -585,4 +585,136 @@ export const forceRunChaseScheduler = onRequest(
   }
 );
 
+/**
+ * DEV ONLY: Check email suppression and recent emailEvents for an address.
+ * GET ?email=...&invoiceId=... (invoiceId optional). Requires x-dev-token = DEV_TEST_TOKEN.
+ */
+export const checkEmailStatus = onRequest(
+  { secrets: [DISABLE_DEV_ENDPOINTS, "DEV_TEST_TOKEN"] },
+  async (req, res) => {
+    const disabled = (DISABLE_DEV_ENDPOINTS.value() || "").trim().toLowerCase() === "true";
+    if (disabled) {
+      res.status(404).send("Not found");
+      return;
+    }
+    res.set("Access-Control-Allow-Origin", "*");
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type, x-dev-token");
+      res.status(204).end();
+      return;
+    }
+    if (req.method !== "GET") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const devToken = process.env.DEV_TEST_TOKEN;
+    if (devToken && req.get("x-dev-token") !== devToken) {
+      res.status(401).json({ error: "UNAUTHORIZED" });
+      return;
+    }
+
+    const emailRaw = typeof req.query?.email === "string" ? req.query.email.trim() : "";
+    if (!emailRaw) {
+      res.status(400).json({ ok: false, error: "MISSING_EMAIL" });
+      return;
+    }
+    const email = emailRaw.toLowerCase();
+    const invoiceId = typeof req.query?.invoiceId === "string" ? req.query.invoiceId.trim() : undefined;
+
+    try {
+      const db = admin.firestore();
+
+      // 1. Suppression doc: email_suppression/{email}
+      const suppressionRef = db.collection("email_suppression").doc(email);
+      const suppressionSnap = await suppressionRef.get();
+      let suppressed: { type: string; createdAt?: unknown; reason?: unknown; raw?: unknown } | null = null;
+      if (suppressionSnap.exists) {
+        const d = suppressionSnap.data();
+        const ts = d?.timestamp ?? d?.createdAt;
+        suppressed = {
+          type: typeof d?.type === "string" ? d.type : "",
+          ...(ts && { createdAt: (ts as admin.firestore.Timestamp)?.toMillis?.() ?? ts }),
+          ...(d?.reason !== undefined && { reason: d.reason }),
+          ...(d?.raw !== undefined && { raw: d.raw }),
+        };
+      }
+
+      // 2. Recent emailEvents: try to==email first, then customerEmail==email
+      const eventsRef = db.collection("emailEvents");
+      let eventsSnap: admin.firestore.QuerySnapshot;
+      try {
+        eventsSnap = await eventsRef
+          .where("to", "==", email)
+          .orderBy("createdAt", "desc")
+          .limit(25)
+          .get();
+      } catch {
+        eventsSnap = { empty: true, docs: [], size: 0 } as admin.firestore.QuerySnapshot;
+      }
+      if (eventsSnap.empty) {
+        try {
+          eventsSnap = await eventsRef
+            .where("customerEmail", "==", email)
+            .orderBy("createdAt", "desc")
+            .limit(25)
+            .get();
+        } catch {
+          eventsSnap = { empty: true, docs: [], size: 0 } as admin.firestore.QuerySnapshot;
+        }
+      }
+
+      let recentEmailEvents: Array<{
+        id: string;
+        type?: string;
+        invoiceId?: string;
+        userId?: string;
+        to?: string;
+        customerEmail?: string;
+        createdAt?: unknown;
+        messageId?: string;
+        status?: string;
+        error?: unknown;
+      }> = eventsSnap.docs.map((d) => {
+        const data = d.data();
+        const createdAt = data.createdAt as admin.firestore.Timestamp | undefined;
+        return {
+          id: d.id,
+          type: data.type,
+          invoiceId: data.invoiceId,
+          userId: data.userId,
+          to: data.to,
+          customerEmail: data.customerEmail,
+          createdAt: createdAt?.toMillis?.() ?? createdAt,
+          messageId: data.messageId,
+          status: data.status,
+          error: data.error,
+        };
+      });
+
+      if (invoiceId) {
+        recentEmailEvents = recentEmailEvents.filter((e) => e.invoiceId === invoiceId);
+      }
+
+      functions.logger.info("[checkEmailStatus]", {
+        email,
+        invoiceId: invoiceId ?? null,
+        suppressed: suppressed ? 1 : 0,
+        recentEmailEventsCount: recentEmailEvents.length,
+      });
+
+      res.status(200).json({
+        ok: true,
+        email,
+        suppressed,
+        recentEmailEvents,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      functions.logger.warn("[checkEmailStatus] error", { email, invoiceId: invoiceId ?? null, error: msg });
+      res.status(500).json({ ok: false, error: msg });
+    }
+  }
+);
+
 export { runChaseScheduler };
