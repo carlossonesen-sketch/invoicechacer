@@ -771,7 +771,7 @@ export function subscribeToChaseEvents(
               return date ? date.toISOString() : new Date().toISOString();
             })(),
             toEmail: data.originalTo || data.to || "",
-            type: data.type === "invoice_initial" || data.type === "invoice_reminder" || data.type === "invoice_due" || data.type === "invoice_late_weekly"
+            type: data.type === "invoice_initial" || data.type === "invoice_updated" || data.type === "invoice_reminder" || data.type === "invoice_due" || data.type === "invoice_late_weekly"
               ? "reminder"
               : (data.type || "reminder"),
             dryRun: data.dryRun || false,

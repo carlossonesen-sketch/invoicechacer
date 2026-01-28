@@ -19,7 +19,7 @@ export interface InvoiceForEmailSend {
 
 export interface SendInvoiceEmailParams {
   invoice: InvoiceForEmailSend;
-  type: "invoice_initial" | "invoice_reminder" | "invoice_due" | "invoice_late_weekly";
+  type: "invoice_initial" | "invoice_updated" | "invoice_reminder" | "invoice_due" | "invoice_late_weekly";
   weekNumber?: number;
 }
 

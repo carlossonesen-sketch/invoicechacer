@@ -74,7 +74,12 @@ function renderPaymentLinkText(paymentLink: string | null | undefined): string {
  * Render initial invoice email
  */
 export function renderInvoiceEmail(params: {
-  type: "invoice_initial" | "invoice_reminder" | "invoice_due" | "invoice_late_weekly";
+  type:
+    | "invoice_initial"
+    | "invoice_updated"
+    | "invoice_reminder"
+    | "invoice_due"
+    | "invoice_late_weekly";
   invoice: InvoiceForEmail;
   weekNumber?: number;
 }): EmailTemplateResult {
@@ -99,6 +104,13 @@ export function renderInvoiceEmail(params: {
       greeting = `Hi ${customerName},`;
       body = `I hope this email finds you well. I'm reaching out to share your invoice for ${amount}, which is due on ${dueDate}.`;
       closing = `If you have any questions or need to discuss payment arrangements, please don't hesitate to reach out. I'm here to help!`;
+      break;
+
+    case "invoice_updated":
+      subject = `Updated Invoice #${invoiceNumber} - ${amount}`;
+      greeting = `Hi ${customerName},`;
+      body = `I've updated your invoice #${invoiceNumber} for ${amount}, which is due on ${dueDate}. This email includes the latest details and replaces any previous versions you may have received.`;
+      closing = `If anything looks incorrect or you have questions about the changes, please reply to this email so we can get it sorted quickly.`;
       break;
 
     case "invoice_reminder":

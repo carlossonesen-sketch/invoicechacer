@@ -13,6 +13,7 @@ export interface PlanLimits {
   maxPendingInvoices: number;
   perInvoiceTypeCaps: {
     invoice_initial: number;
+    invoice_updated: number;
     invoice_reminder: number;
     invoice_due: number;
     invoice_late_weekly: number;
@@ -30,6 +31,7 @@ export const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxPendingInvoices: 10,
     perInvoiceTypeCaps: {
       invoice_initial: 1,
+      invoice_updated: 5, // Manual resends after edit
       invoice_reminder: 1,
       invoice_due: 1,
       invoice_late_weekly: 3, // Only weeks 1-3 allowed
@@ -41,6 +43,7 @@ export const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxPendingInvoices: Infinity,
     perInvoiceTypeCaps: {
       invoice_initial: Infinity, // No cap, but idempotency still enforced
+      invoice_updated: Infinity,
       invoice_reminder: Infinity,
       invoice_due: Infinity,
       invoice_late_weekly: Infinity, // All 8 weeks allowed
@@ -52,6 +55,7 @@ export const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxPendingInvoices: Infinity,
     perInvoiceTypeCaps: {
       invoice_initial: Infinity,
+      invoice_updated: Infinity,
       invoice_reminder: Infinity,
       invoice_due: Infinity,
       invoice_late_weekly: Infinity,
@@ -63,6 +67,7 @@ export const PLAN_LIMITS: Record<Plan, PlanLimits> = {
     maxPendingInvoices: Infinity,
     perInvoiceTypeCaps: {
       invoice_initial: Infinity,
+      invoice_updated: Infinity,
       invoice_reminder: Infinity,
       invoice_due: Infinity,
       invoice_late_weekly: Infinity,

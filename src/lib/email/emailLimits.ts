@@ -22,7 +22,12 @@ import { ApiError } from "@/lib/api/ApiError";
 export interface EmailLimitParams {
   userId: string;
   invoiceId: string;
-  emailType?: "invoice_initial" | "invoice_reminder" | "invoice_due" | "invoice_late_weekly";
+  emailType?:
+    | "invoice_initial"
+    | "invoice_updated"
+    | "invoice_reminder"
+    | "invoice_due"
+    | "invoice_late_weekly";
   weekNumber?: number;
 }
 
@@ -131,7 +136,12 @@ async function getLastEmailForInvoice(invoiceId: string): Promise<Timestamp | nu
  */
 export async function countInvoiceEmailEvents(
   invoiceId: string,
-  type: "invoice_initial" | "invoice_reminder" | "invoice_due" | "invoice_late_weekly",
+  type:
+    | "invoice_initial"
+    | "invoice_updated"
+    | "invoice_reminder"
+    | "invoice_due"
+    | "invoice_late_weekly",
   weekNumber?: number
 ): Promise<number> {
   const db = getAdminFirestore();
@@ -292,11 +302,14 @@ export async function assertEmailLimits(params: EmailLimitParams): Promise<void>
         // For other types: check count for this type
         const count = await countInvoiceEmailEvents(invoiceId, emailType);
         if (count >= typeCap) {
-          const errorCode = emailType === "invoice_reminder" 
-            ? "TRIAL_REMINDER_LIMIT_REACHED"
-            : emailType === "invoice_initial"
-            ? "TRIAL_INITIAL_LIMIT_REACHED"
-            : "TRIAL_EMAIL_LIMIT_REACHED";
+          const errorCode =
+            emailType === "invoice_reminder"
+              ? "TRIAL_REMINDER_LIMIT_REACHED"
+              : emailType === "invoice_initial"
+                ? "TRIAL_INITIAL_LIMIT_REACHED"
+                : emailType === "invoice_updated"
+                  ? "TRIAL_UPDATED_LIMIT_REACHED"
+                  : "TRIAL_EMAIL_LIMIT_REACHED";
           throw new ApiError(
             errorCode,
             `${errorCode}: Trial plan allows only ${typeCap} ${emailType} email(s) per invoice. Upgrade to send more.`,

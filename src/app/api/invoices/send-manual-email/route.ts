@@ -115,10 +115,10 @@ export async function POST(request: NextRequest) {
       invoiceNumber: (data.invoiceNumber as string) || invoiceId.slice(0, 8),
     };
 
-    // Manual send: invoice_initial template, but DO NOT touch auto-chase fields
+    // Manual send: distinct manual type (invoice_updated), DO NOT touch auto-chase fields
     await sendInvoiceEmail({
       invoice: invoicePayload,
-      type: "invoice_initial",
+      type: "invoice_updated",
     });
 
     return NextResponse.json({ success: true });
