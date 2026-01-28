@@ -13,6 +13,7 @@ import { sendEmailSes } from "../email/ses";
 import { renderChaseEmail } from "../email/chaseTemplate";
 
 const BATCH_LIMIT = 50;
+const FALLBACK_LIMIT = 25;  // max legacy invoices missing nextChaseAt to fix per run
 const PROCESSING_LOCK_MS = 10 * 60 * 1000;   // 10 min
 const LAST_CHASED_COOLDOWN_MS = 60 * 60 * 1000; // 1 hr
 const IDEMPOTENCY_WINDOW_MS = 90 * 60 * 1000;   // 90 min
@@ -38,6 +39,13 @@ interface NextChase {
 }
 
 const EPOCH = new Date(0);
+
+function redactEmail(email: string): string {
+  if (!email || email.length < 4) return "***";
+  const at = email.indexOf("@");
+  if (at <= 0) return "***@***";
+  return email.slice(0, 2) + "***@" + (email.slice(at + 1, at + 3) || "**") + "***";
+}
 
 async function computeNextChase(
   chaseEventsRef: admin.firestore.CollectionReference,
@@ -129,6 +137,22 @@ export async function runChaseSchedulerLogic(): Promise<void> {
     const now = new Date();
     const limit = Math.min(parseInt(process.env.CHASE_BATCH_LIMIT || String(BATCH_LIMIT), 10) || BATCH_LIMIT, 100);
 
+    // Debug: log now and exact query filters
+    const queryFilters = {
+      collectionGroup: "invoices",
+      statusIn: ["pending", "overdue"] as const,
+      autoChaseEnabled: true,
+      nextChaseAtLte: now.toISOString(),
+      nextChaseAtLteTimestamp: now.getTime(),
+      limit,
+    };
+    functions.logger.info("[runChaseScheduler] debug now and query", {
+      now: now.toISOString(),
+      nowTimestamp: now.getTime(),
+      queryFilters,
+    });
+
+    // Main query: unpaid, auto-chase on, nextChaseAt <= now (canonical path: businessProfiles/{uid}/invoices)
     const snap = await db
       .collectionGroup("invoices")
       .where("status", "in", ["pending", "overdue"])
@@ -139,36 +163,115 @@ export async function runChaseSchedulerLogic(): Promise<void> {
 
     let processed = 0;
     let sent = 0;
-    let skipped = 0;
+    let candidatesFound = snap.size;
+    let candidatesMissingNextChaseAt = 0;
+    let candidatesFilteredOutPaid = 0; // query already excludes paid (status in pending/overdue)
+    let candidatesFilteredOutNoEmail = 0;
+    let candidatesFilteredOutNoDueAt = 0;
+    let candidatesFilteredOutPlanLimit = 0; // scheduler does not apply plan limit
+    const skipReasons: Record<string, number> = {
+      locked: 0,
+      lastChasedAt: 0,
+      no_next: 0,
+      idempotent: 0,
+      maxChasesReached: 0,
+      not_found: 0,
+    };
 
-    for (const doc of snap.docs) {
+    // Build list to process: main snap + legacy invoices missing nextChaseAt (set nextChaseAt=now then process)
+    const toProcess: admin.firestore.QueryDocumentSnapshot[] = [...snap.docs];
+
+    if (snap.empty) {
+      const fallbackSnap = await db
+        .collectionGroup("invoices")
+        .where("status", "in", ["pending", "overdue"])
+        .where("autoChaseEnabled", "==", true)
+        .limit(limit * 4)
+        .get();
+      const missingNext = fallbackSnap.docs.filter((d) => d.data().nextChaseAt == null);
+      const capped = missingNext.slice(0, FALLBACK_LIMIT);
+      candidatesMissingNextChaseAt = missingNext.length;
+      functions.logger.info("[runChaseScheduler] zero candidates from main query; running fallback for legacy missing nextChaseAt", {
+        queryParams: queryFilters,
+        candidatesFound: snap.size,
+        fallbackTotal: fallbackSnap.size,
+        fallbackMissingNextChaseAt: missingNext.length,
+        fallbackCapped: capped.length,
+      });
+      for (const doc of capped) {
+        try {
+          await doc.ref.update({ nextChaseAt: Timestamp.fromDate(now) });
+          toProcess.push(doc);
+        } catch (e) {
+          functions.logger.warn("[runChaseScheduler] fallback set nextChaseAt failed", { invoiceId: doc.id, error: String(e) });
+        }
+      }
+    }
+
+    functions.logger.info("[runChaseScheduler] debug counts after query", {
+      candidatesFound,
+      candidatesMissingNextChaseAt,
+      candidatesFilteredOutPaid,
+      candidatesFilteredOutNoEmail,
+      candidatesFilteredOutNoDueAt,
+      candidatesFilteredOutPlanLimit,
+      toProcessLength: toProcess.length,
+    });
+
+    let candidateDebugIndex = 0;
+    for (const doc of toProcess) {
       const data = doc.data();
       const invoiceRef = doc.ref;
       const uid = invoiceRef.parent?.parent?.id ?? data.userId ?? "";
       const invoiceId = doc.id;
-      // Specific invoice path; no collectionGroup("chaseEvents") to avoid index errors.
+      // Path: businessProfiles/{uid}/invoices/{invoiceId}/chaseEvents (matches app)
       const chaseEventsRef = db
-        .collection("users")
+        .collection("businessProfiles")
         .doc(uid)
         .collection("invoices")
         .doc(invoiceId)
         .collection("chaseEvents");
 
+      const logFirstFive = (reason: string) => {
+        if (candidateDebugIndex >= 5) return;
+        const d = doc.data();
+        const dueAtVal = toDate(d.dueAt);
+        const nextChaseVal = toDate(d.nextChaseAt);
+        const lastChasedVal = toDate(d.lastChasedAt);
+        functions.logger.info("[runChaseScheduler] debug candidate", {
+          index: candidateDebugIndex + 1,
+          invoiceId: doc.id,
+          dueAt: dueAtVal ? dueAtVal.toISOString() : null,
+          nextChaseAt: nextChaseVal ? nextChaseVal.toISOString() : null,
+          lastChasedAt: lastChasedVal ? lastChasedVal.toISOString() : null,
+          chaseCount: typeof d.chaseCount === "number" ? d.chaseCount : 0,
+          status: d.status ?? null,
+          paidAt: d.paidAt != null ? (typeof d.paidAt === "object" && "toDate" in d.paidAt ? (d.paidAt as admin.firestore.Timestamp).toDate().toISOString() : String(d.paidAt)) : null,
+          customerEmailRedacted: d.customerEmail ? redactEmail(String(d.customerEmail)) : null,
+          planTier: "not_checked",
+          reason,
+        });
+        candidateDebugIndex++;
+      };
+
       if (!data.customerEmail?.trim() || !data.dueAt) {
-        skipped++;
+        if (!data.customerEmail?.trim()) candidatesFilteredOutNoEmail++;
+        if (!data.dueAt) candidatesFilteredOutNoDueAt++;
+        logFirstFive("noEmail_or_noDueAt");
         continue;
       }
 
       const dueAt = toDate(data.dueAt);
       if (!dueAt) {
-        skipped++;
+        candidatesFilteredOutNoDueAt++;
+        logFirstFive("noDueAt_invalid");
         continue;
       }
 
       try {
         const result = await db.runTransaction(async (tx) => {
           const inv = await tx.get(invoiceRef);
-          if (!inv.exists) return { action: "skip" as const };
+          if (!inv.exists) return { action: "skip" as const, reason: "not_found" as const };
           const d = inv.data()!;
 
           // Lock: skip if processingAt is recent
@@ -221,7 +324,9 @@ export async function runChaseSchedulerLogic(): Promise<void> {
         });
 
         if (result.action === "skip") {
-          skipped++;
+          const reason = result.reason ?? "unknown";
+          skipReasons[reason] = (skipReasons[reason] ?? 0) + 1;
+          logFirstFive(reason);
           continue;
         }
 
@@ -229,13 +334,16 @@ export async function runChaseSchedulerLogic(): Promise<void> {
         const { next, customerName, customerEmail, amount, paymentLink, invoiceNumber, maxChases, chaseCount } = result;
 
         if (chaseCount >= maxChases) {
+          skipReasons.maxChasesReached++;
+          logFirstFive("maxChasesReached");
           await invoiceRef.update({
             nextChaseAt: FieldValue.delete(),
             processingAt: FieldValue.delete(),
           });
-          skipped++;
           continue;
         }
+
+        logFirstFive("send");
 
         const template = renderChaseEmail(next.type, {
           customerName,
@@ -265,13 +373,19 @@ export async function runChaseSchedulerLogic(): Promise<void> {
         let errMsg: string | undefined;
 
         try {
-          const sent = await sendEmailSes({
+          const sendResult = await sendEmailSes({
             to: customerEmail,
             subject: template.subject,
             html: template.html,
             text: template.text,
           });
-          messageId = sent.messageId;
+          messageId = sendResult.messageId;
+          functions.logger.info("[runChaseScheduler] sent", {
+            invoiceId: doc.id,
+            recipient: customerEmail,
+            templateType: next.type,
+            messageId: sendResult.messageId ?? undefined,
+          });
         } catch (e) {
           errMsg = e instanceof Error ? e.message : String(e);
           functions.logger.warn(`[runChaseScheduler] sendEmailSes failed invoice=${doc.id}`, e);
@@ -325,8 +439,23 @@ export async function runChaseSchedulerLogic(): Promise<void> {
       }
     }
 
+    functions.logger.info("[runChaseScheduler] debug counts final", {
+      now: now.toISOString(),
+      queryFilters,
+      candidatesFound,
+      candidatesMissingNextChaseAt,
+      candidatesFilteredOutPaid,
+      candidatesFilteredOutNoEmail,
+      candidatesFilteredOutNoDueAt: candidatesFilteredOutNoDueAt,
+      candidatesFilteredOutPlanLimit,
+      skipReasons,
+      toProcessLength: toProcess.length,
+      processed,
+      sent,
+      dryRun,
+    });
     functions.logger.info(
-      `[runChaseScheduler] processed=${processed} sent=${sent} skipped=${snap.size - processed} dryRun=${dryRun}`
+      `[runChaseScheduler] processed=${processed} sent=${sent} skipped=${toProcess.length - processed} dryRun=${dryRun}`
     );
 }
 

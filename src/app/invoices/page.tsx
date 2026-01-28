@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, firebaseUnavailable } from "@/lib/firebase";
-import { subscribeToUserInvoices, fetchNextPageOfInvoices, markInvoicePaid, FirestoreInvoice, InvoiceSubscriptionResult } from "@/lib/invoices";
+import { subscribeToUserInvoices, fetchNextPageOfInvoices, markInvoicePaid, FirestoreInvoice, InvoiceSubscriptionResult, invoiceIsPaid } from "@/lib/invoices";
 import { QueryDocumentSnapshot } from "firebase/firestore";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -69,6 +69,8 @@ export default function InvoicesPage() {
     let mounted = true;
     setLoading(true);
     setAllInvoices([]);
+    setLastDoc(undefined);
+    setHasMore(false);
     setInvoiceLoadError(null);
     setRealtimePaused(false);
 
@@ -122,7 +124,8 @@ export default function InvoicesPage() {
         invoiceUnsubscribeRef.current = null;
       }
     };
-  }, [user, router, invoiceRetryCount]);
+    // showPaid in deps: when toggle changes, reset to first page and refetch so list updates (client filter uses same data; refetch avoids stale "load more" cursor)
+  }, [user, router, invoiceRetryCount, showPaid]);
 
   // Filter invoices client-side (since we already have userId filter from query)
   const filteredInvoices = useMemo(() => {
@@ -138,9 +141,9 @@ export default function InvoicesPage() {
       );
     }
 
-    // Exclude paid invoices by default unless "Show paid" is enabled
+    // Exclude paid invoices by default unless "Show paid" is enabled; use invoiceIsPaid for consistency
     if (!showPaid) {
-      filtered = filtered.filter(inv => inv.status !== "paid");
+      filtered = filtered.filter(inv => !invoiceIsPaid(inv));
     }
 
     // Apply status filter (including computed overdue)
@@ -148,10 +151,10 @@ export default function InvoicesPage() {
       const now = new Date();
       filtered = filtered.filter(inv => {
         if (statusFilter === "overdue") {
-          // Compute overdue: dueAt < now AND status != "paid"
           const dueDate = toJsDate(inv.dueAt) || new Date();
-          return inv.status !== "paid" && dueDate < now;
+          return !invoiceIsPaid(inv) && dueDate < now;
         }
+        if (statusFilter === "paid") return invoiceIsPaid(inv);
         return inv.status === statusFilter;
       });
     }

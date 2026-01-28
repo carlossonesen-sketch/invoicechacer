@@ -119,12 +119,40 @@ export async function POST(request: NextRequest) {
 
     // Create invoice in businessProfiles/{userId}/invoices
     const invoicesRef = getInvoicesRef(db, userId);
+    const dueAtDate = new Date(dueAt);
+    const now = new Date();
+    const dueOnly = new Date(dueAtDate.getFullYear(), dueAtDate.getMonth(), dueAtDate.getDate());
+    const nowOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const daysLate = Math.max(0, Math.floor((nowOnly.getTime() - dueOnly.getTime()) / 86400000));
+
+    // Always write nextChaseAt as Firestore Timestamp when set. Overdue => now + late_week_1/2/3; else normal flow.
+    let nextChaseAt: ReturnType<typeof Timestamp.fromDate> | null = null;
+    let chaseStage: string | null = null;
+    let chaseType: string | null = null;
+    let weekNumber: number | null = null;
+
+    if (status !== "pending" && status !== "overdue") {
+      // Paid: no chase scheduling
+    } else if (dueAtDate < now) {
+      // Overdue: nextChaseAt = now so scheduler processes immediately; set late_week_1/2/3 from daysLate
+      nextChaseAt = Timestamp.fromDate(now);
+      const w = daysLate <= 7 ? 1 : daysLate <= 14 ? 2 : 3;
+      chaseStage = `late_week_${w}`;
+      chaseType = "invoice_late_weekly";
+      weekNumber = w;
+    } else if (autoChaseEnabled) {
+      // Not overdue: normal flow — first chase ~1 min from now (initial send / due schedule)
+      nextChaseAt = Timestamp.fromDate(new Date(now.getTime() + 60000));
+    } else {
+      // Not overdue, no auto-chase: no nextChaseAt
+    }
+
     const newInvoice = {
       userId,
       customerName: customerName.trim(),
       customerEmail: customerEmail.trim(),
       amount: typeof amount === "number" ? amount : parseInt(amount, 10),
-      dueAt: Timestamp.fromDate(new Date(dueAt)),
+      dueAt: Timestamp.fromDate(dueAtDate),
       status,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
@@ -135,9 +163,10 @@ export async function POST(request: NextRequest) {
       maxChases: maxChases || null,
       chaseCount: 0,
       lastChasedAt: null,
-      nextChaseAt: autoChaseEnabled
-        ? Timestamp.fromDate(new Date(Date.now() + 60000)) // 1 minute from now
-        : null,
+      nextChaseAt,
+      ...(chaseStage != null && { chaseStage }),
+      ...(chaseType != null && { chaseType }),
+      ...(weekNumber != null && { weekNumber }),
     };
 
     const docRef = await invoicesRef.add(newInvoice);

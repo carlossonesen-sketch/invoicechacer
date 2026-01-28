@@ -15,6 +15,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { FormField } from "@/components/ui/form-field";
 import { UpgradeModal } from "@/components/ui/upgrade-modal";
+import { useToast } from "@/components/ui/toast";
 import { isValidEmail, isValidUrl } from "@/lib/utils";
 import { useEntitlements } from "@/hooks/useEntitlements";
 import { User } from "firebase/auth";
@@ -23,6 +24,7 @@ export default function NewInvoicePage() {
   const router = useRouter();
   const pathname = usePathname();
   const { isPro } = useEntitlements();
+  const { showToast, ToastComponent } = useToast();
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState<string>("");
@@ -30,6 +32,9 @@ export default function NewInvoicePage() {
   const [upgradeModalMessage, setUpgradeModalMessage] = useState<string | undefined>(undefined);
   const [user, setUser] = useState<User | null>(null);
   const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null);
+  const [emailSent, setEmailSent] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const didRedirectRef = useRef<boolean>(false);
 
   const [formData, setFormData] = useState<{
@@ -159,10 +164,11 @@ export default function NewInvoicePage() {
         maxChases: formData.maxChases,
       });
 
-      // Store invoice ID and reset form for "Add another" flow
       setCreatedInvoiceId(invoiceId);
+      setEmailSent(false);
+      setSendError(null);
       setSuccessMessage("Invoice created! Send it to your customer to get paid faster.");
-      
+
       // Reset form to allow adding another invoice
       setFormData({
         customerName: "",
@@ -205,6 +211,63 @@ export default function NewInvoicePage() {
         }
       }
       setErrors({ submit: errorMessage });
+    }
+  }
+
+  async function handleSendInvoiceNow() {
+    if (!createdInvoiceId || !user) return;
+    setSendingEmail(true);
+    setSendError(null);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/invoices/send-initial-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
+        body: JSON.stringify({ invoiceId: createdInvoiceId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+        message?: string;
+        alreadySent?: boolean;
+        redirectTo?: string;
+      };
+      if (!res.ok) {
+        if (res.status === 400 && data.alreadySent) {
+          showToast("Email already sent", "info");
+          setEmailSent(true);
+          setSendError(null);
+          return;
+        }
+        const msg = [data.message, data.error, data.code].filter(Boolean).join(" — ") || "Failed to send email.";
+        setSendError(msg);
+        showToast(msg, "error");
+        if (res.status === 401) {
+          router.replace("/login?redirect=" + encodeURIComponent("/invoices/new"));
+          return;
+        }
+        if (res.status === 403 && data.error === "TRIAL_EXPIRED" && data.redirectTo) {
+          router.push(data.redirectTo);
+          return;
+        }
+        if (res.status === 403 && data.error && data.error.startsWith("TRIAL_")) {
+          setUpgradeModalMessage(data.message ?? "You've reached the trial limit for emails. Upgrade to send more.");
+          setShowUpgradeModal(true);
+        }
+        return;
+      }
+      showToast("Email sent successfully", "success");
+      setEmailSent(true);
+      setSendError(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to send email. Please try again.";
+      setSendError(msg);
+      showToast(msg, "error");
+    } finally {
+      setSendingEmail(false);
     }
   }
 
@@ -364,38 +427,59 @@ export default function NewInvoicePage() {
             )}
           </div>
 
-          {successMessage && (
+          {successMessage && createdInvoiceId && (
             <div className="bg-green-50 border border-green-200 rounded-md p-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex flex-col gap-3">
                 <p className="text-sm text-green-800 font-medium">{successMessage}</p>
-                {createdInvoiceId && (
-                  <div className="flex gap-2 flex-shrink-0">
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => router.push(`/invoices/${createdInvoiceId}`)}
-                    >
-                      Send to customer
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        setSuccessMessage("");
-                        setCreatedInvoiceId(null);
-                        if (pathname !== "/invoices/new") {
-                          router.replace("/invoices/new");
-                          router.refresh();
-                        } else {
-                          router.refresh();
-                        }
-                      }}
-                    >
-                      Add another
-                    </Button>
-                  </div>
+                {sendError && (
+                  <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+                    {sendError}
+                  </p>
                 )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {!emailSent ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleSendInvoiceNow}
+                      disabled={sendingEmail}
+                    >
+                      {sendingEmail ? "Sending…" : "Send invoice email now"}
+                    </Button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-green-100 text-green-800 text-sm font-medium border border-green-200">
+                      <span aria-hidden>✅</span>
+                      Email sent
+                    </span>
+                  )}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => router.push(`/invoices/${createdInvoiceId}`)}
+                  >
+                    View invoice
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setSuccessMessage("");
+                      setCreatedInvoiceId(null);
+                      setEmailSent(false);
+                      setSendError(null);
+                      if (pathname !== "/invoices/new") {
+                        router.replace("/invoices/new");
+                        router.refresh();
+                      } else {
+                        router.refresh();
+                      }
+                    }}
+                  >
+                    Add another
+                  </Button>
+                </div>
               </div>
             </div>
           )}
@@ -427,6 +511,7 @@ export default function NewInvoicePage() {
           message={upgradeModalMessage ?? "Auto-chase is a Pro feature. Upgrade now to automatically send reminder emails to your customers."}
         />
       </div>
+      {ToastComponent}
     </AppLayout>
   );
 }

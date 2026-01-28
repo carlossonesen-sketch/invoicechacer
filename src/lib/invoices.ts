@@ -28,6 +28,11 @@ export interface FirestoreInvoice {
   paidAt?: Timestamp | string;
 }
 
+/** Single rule for "paid": status === "paid" OR paidAt exists */
+export function invoiceIsPaid(inv: FirestoreInvoice): boolean {
+  return inv.status === "paid" || !!inv.paidAt;
+}
+
 export interface InvoiceQueryResult {
   invoices: FirestoreInvoice[];
   error?: string;

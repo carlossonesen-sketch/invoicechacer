@@ -264,12 +264,13 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
     );
 
     if (isProd()) {
-      console.log("[EMAIL SEND] Email sent successfully", { invoiceId, type });
+      console.log("[EMAIL SEND] sent", { invoiceId, type, messageId: messageId ?? undefined });
     } else {
-      console.log("[EMAIL SEND] Email sent successfully", {
+      console.log("[EMAIL SEND] sent", {
         invoiceId,
         recipient: finalEmail,
         type,
+        messageId: messageId ?? undefined,
         userId,
       });
     }
@@ -292,6 +293,10 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
     await writeEmailEvent(event);
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : "Unknown error";
+    const suppressed = /suppress|Suppression/i.test(errMsg);
+    if (suppressed) {
+      console.warn("[EMAIL SEND] suppressed", { recipient: finalEmail, type, invoiceId });
+    }
     if (isProd()) {
       console.error("[EMAIL SEND ERROR] Failed to send email", { invoiceId, type, error: errMsg });
     } else {

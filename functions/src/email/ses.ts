@@ -74,9 +74,19 @@ export async function sendEmailSes(input: {
 
   try {
     const out = await client.send(command);
-    return { messageId: out.MessageId };
-  } catch (err) {
+    const messageId = out.MessageId ?? undefined;
+    const { logger } = await import("firebase-functions");
+    logger.info("[SES] sent", { recipient: input.to, messageId });
+    return { messageId };
+  } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
+    const errCode = err && typeof err === "object" && "name" in err ? String((err as { name?: string }).name) : "";
+    const { logger } = await import("firebase-functions");
+    if (msg.toLowerCase().includes("suppress") || errCode.includes("Suppression")) {
+      logger.warn("[SES] suppressed", { recipient: input.to, error: msg });
+    } else {
+      logger.warn("[SES] send failed", { recipient: input.to, error: msg });
+    }
     throw new Error(`SES send failed: ${msg}`);
   }
 }

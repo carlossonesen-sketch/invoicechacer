@@ -6,7 +6,7 @@ import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { subscribeToUserInvoices, fetchNextPageOfInvoices, markInvoicePaid, FirestoreInvoice, InvoiceSubscriptionResult } from "@/lib/invoices";
+import { subscribeToUserInvoices, fetchNextPageOfInvoices, markInvoicePaid, FirestoreInvoice, InvoiceSubscriptionResult, invoiceIsPaid } from "@/lib/invoices";
 import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -287,9 +287,9 @@ export default function DashboardPage() {
   const recentInvoices = useMemo(() => {
     let filtered = [...allInvoices];
     
-    // Exclude paid invoices by default
+    // Exclude paid invoices by default; use invoiceIsPaid for consistency
     if (!showPaid) {
-      filtered = filtered.filter(inv => inv.status !== "paid" && !inv.paidAt);
+      filtered = filtered.filter(inv => !invoiceIsPaid(inv));
     }
     
     return filtered

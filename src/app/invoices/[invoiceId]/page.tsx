@@ -39,6 +39,7 @@ export default function InvoiceDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [sendingChaseNow, setSendingChaseNow] = useState(false);
   const [isEditing, setIsEditing] = useState(shouldStartEditing);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState<string>("");
@@ -389,6 +390,13 @@ export default function InvoiceDetailPage() {
         showToast("Invoice email sent successfully!", "success");
         setSuccessMessage("Invoice email sent");
         setTimeout(() => setSuccessMessage(""), 3000);
+        if (invoice) {
+          setInvoice({
+            ...invoice,
+            lastChasedAt: new Date().toISOString(),
+            chaseCount: (invoice.chaseCount ?? 0) + 1,
+          });
+        }
       }
     } catch (error: unknown) {
       console.error("Failed to send invoice email:", error);
@@ -400,6 +408,64 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  async function handleSendChaseNow() {
+    if (!invoice || !user) return;
+    setSendingChaseNow(true);
+    setErrors({});
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch("/api/invoices/send-chase-now", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
+        body: JSON.stringify({ invoiceId: invoice.id }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        code?: string;
+        message?: string;
+        success?: boolean;
+        skipped?: boolean;
+        redirectTo?: string;
+      };
+      if (!response.ok) {
+        if (response.status === 403 || response.status === 429) {
+          setUpgradeModalMessage(
+            data.message || (response.status === 429 ? "Rate limit or cooldown hit. Upgrade for higher limits." : "Trial limit reached. Upgrade for more chase emails.")
+          );
+          setShowUpgradeModal(true);
+          return;
+        }
+        const msg = [data.message, data.code, data.error].filter(Boolean).join(" — ") || "Failed to send.";
+        showToast(msg, "error");
+        setErrors({ submit: msg });
+        return;
+      }
+      if (data.skipped) {
+        showToast("No chase email to send right now.", "info");
+        return;
+      }
+      showToast(data.message || "Chase email sent.", "success");
+      setSuccessMessage(data.message || "Chase email sent");
+      setTimeout(() => setSuccessMessage(""), 3000);
+      if (invoice) {
+        setInvoice({
+          ...invoice,
+          lastChasedAt: new Date().toISOString(),
+          chaseCount: (invoice.chaseCount ?? 0) + 1,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to send chase email.";
+      showToast(msg, "error");
+      setErrors({ submit: msg });
+    } finally {
+      setSendingChaseNow(false);
+    }
+  }
+
   // Memoize due date conversion to avoid recalculation
   // MUST be called before any conditional returns to maintain hooks order
   const dueDateForDisplay = useMemo(() => {
@@ -407,6 +473,10 @@ export default function InvoiceDetailPage() {
     const date = toJsDate(invoice.dueAt);
     return date || new Date();
   }, [invoice?.dueAt]);
+
+  const hasSentAnyEmail =
+    !!invoice &&
+    (chaseEvents.length > 0 || !!invoice.lastChasedAt || (invoice.chaseCount ?? 0) > 0);
 
   if (loading) {
     return (
@@ -523,19 +593,62 @@ export default function InvoiceDetailPage() {
                 </div>
               </div>
               <div className="flex flex-col items-end gap-2 ml-4">
-                {!isEditing && invoice.status !== "paid" && chaseEvents.length === 0 && invoice.customerEmail && (
+                {!isEditing && (
+                  <div className="flex flex-col items-end gap-1 text-sm text-gray-600">
+                    {hasSentAnyEmail && (
+                      <>
+                        <div className="flex items-center gap-1.5">
+                          <span aria-hidden>✅</span>
+                          <span>Email sent</span>
+                        </div>
+                        <div className="text-gray-600">
+                          {(() => {
+                            const newestEvent = chaseEvents.length > 0
+                              ? chaseEvents.reduce((a, b) => (new Date(a.createdAt).getTime() > new Date(b.createdAt).getTime() ? a : b))
+                              : null;
+                            const lastAt = newestEvent?.createdAt
+                              ? new Date(newestEvent.createdAt)
+                              : (invoice?.lastChasedAt != null ? (toJsDate(invoice.lastChasedAt) ?? (typeof invoice.lastChasedAt === "string" ? new Date(invoice.lastChasedAt) : null)) : null);
+                            return lastAt && !isNaN(lastAt.getTime())
+                              ? `Last chase: ${lastAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`
+                              : "Last chase: —";
+                          })()}
+                        </div>
+                        <div className="text-gray-500">
+                          {(() => {
+                            const nextAt = invoice?.nextChaseAt != null ? (toJsDate(invoice.nextChaseAt) ?? (typeof invoice.nextChaseAt === "string" ? new Date(invoice.nextChaseAt) : null)) : null;
+                            const now = new Date();
+                            if (!nextAt || isNaN(nextAt.getTime())) return "Next chase: —";
+                            if (nextAt <= now) return "Next chase: due now";
+                            return `Next chase: ${nextAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`;
+                          })()}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+                {!isEditing && invoice.status !== "paid" && !hasSentAnyEmail && invoice.customerEmail && (
                   <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5">
                     Your customer hasn&apos;t received this yet. Send it now to get paid faster.
                   </p>
                 )}
                 <div className="flex gap-2">
-                {!isEditing && invoice.status !== "paid" && (
+                {!isEditing && invoice.status !== "paid" && !hasSentAnyEmail && (
                   <Button 
                     onClick={handleSendInvoice}
                     disabled={sendingEmail || !invoice.customerEmail}
                     className="bg-blue-600 hover:bg-blue-700 text-white"
                   >
-                    {sendingEmail ? "Sending..." : "Send Invoice"}
+                    {sendingEmail ? "Sending..." : "Send to customer"}
+                  </Button>
+                )}
+                {!isEditing && invoice.status !== "paid" && hasSentAnyEmail && (
+                  <Button
+                    variant="secondary"
+                    onClick={handleSendChaseNow}
+                    disabled={sendingChaseNow}
+                  >
+                    {sendingChaseNow ? "Sending..." : "Send now"}
                   </Button>
                 )}
                 {!isEditing && (

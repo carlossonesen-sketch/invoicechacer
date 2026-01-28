@@ -35,3 +35,11 @@ export function isTrialActiveOrPaid(profile: ProfileLike | null | undefined, now
 
   return false;
 }
+
+/**
+ * True if user has paid subscription (active only; trial does not count).
+ */
+export function isPaid(profile: ProfileLike | null | undefined): boolean {
+  if (!profile || typeof profile !== "object") return false;
+  return profile.subscriptionStatus === "active";
+}

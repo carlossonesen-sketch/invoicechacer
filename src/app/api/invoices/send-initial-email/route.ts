@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
-import { Timestamp } from "firebase-admin/firestore";
+import { Timestamp, FieldValue } from "firebase-admin/firestore";
 import { sendInvoiceEmail } from "@/lib/email/sendInvoiceEmail";
 import { getRequestId } from "@/lib/api/requestId";
 import { mapErrorToHttp } from "@/lib/api/httpError";
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
 
     const db = getAdminFirestore();
 
-    const { businessId, exists, data } = await resolveInvoiceRefAndBusinessId(db, invoiceId, userId);
+    const { businessId, exists, data, invoiceRef } = await resolveInvoiceRefAndBusinessId(db, invoiceId, userId);
 
     if (!exists || !data) {
       return NextResponse.json(
@@ -87,22 +87,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if initial email already sent (idempotency check)
-    // Note: assertEmailLimits in sendEmailSafe will also check trial limits
-    const emailEventsRef = db.collection("emailEvents");
-    const existingEvent = await emailEventsRef
-      .where("invoiceId", "==", invoiceId)
-      .where("type", "==", "invoice_initial")
-      .limit(1)
-      .get();
-
-    if (!existingEvent.empty) {
-      return NextResponse.json(
-        { error: "Initial invoice email already sent", alreadySent: true },
-        { status: 400 }
-      );
-    }
-
     // Validate required fields
     if (!data.customerEmail || !data.dueAt) {
       return NextResponse.json(
@@ -111,19 +95,87 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Send initial email
+    const dueAtDate = data.dueAt instanceof Timestamp ? data.dueAt.toDate() : new Date(String(data.dueAt ?? ""));
+    const now = new Date();
+    const chaseCount = (data.chaseCount as number | undefined) ?? 0;
+
+    const emailEventsRef = db.collection("emailEvents");
+    const existingInitial = await emailEventsRef
+      .where("invoiceId", "==", invoiceId)
+      .where("type", "==", "invoice_initial")
+      .limit(1)
+      .get();
+
+    if (!existingInitial.empty) {
+      return NextResponse.json(
+        { error: "Initial invoice email already sent", alreadySent: true },
+        { status: 400 }
+      );
+    }
+
+    const invoicePayload = {
+      id: invoiceId,
+      userId: businessId || "",
+      customerName: (data.customerName as string) || "Customer",
+      customerEmail: (data.customerEmail as string) ?? "",
+      amount: (data.amount as number) ?? 0,
+      dueAt: dueAtDate,
+      paymentLink: (data.paymentLink as string | null) ?? null,
+      invoiceNumber: (data.invoiceNumber as string) || invoiceId.slice(0, 8),
+    };
+
+    // Overdue + no sends yet: send late_week_N based on days overdue (do not require initial/due first)
+    if (dueAtDate < now && chaseCount === 0) {
+      const daysPastDue = Math.floor((now.getTime() - dueAtDate.getTime()) / (24 * 60 * 60 * 1000));
+      const weekNumber = Math.min(Math.max(1, Math.floor(daysPastDue / 7) + 1), 8);
+
+      const existingLate = await emailEventsRef
+        .where("invoiceId", "==", invoiceId)
+        .where("type", "==", "invoice_late_weekly")
+        .where("weekNumber", "==", weekNumber)
+        .limit(1)
+        .get();
+
+      if (!existingLate.empty) {
+        return NextResponse.json(
+          { error: `Week ${weekNumber} follow-up already sent`, alreadySent: true },
+          { status: 400 }
+        );
+      }
+
+      await sendInvoiceEmail({
+        invoice: invoicePayload,
+        type: "invoice_late_weekly",
+        weekNumber,
+      });
+      const autoDays = (typeof (data.autoChaseDays as number) === "number" ? (data.autoChaseDays as number) : 1) as number;
+      const nextRun = new Date(now.getTime() + autoDays * 86400000);
+      await invoiceRef.update({
+        lastChasedAt: Timestamp.fromDate(now),
+        chaseCount: FieldValue.increment(1),
+        nextChaseAt: Timestamp.fromDate(nextRun),
+        updatedAt: Timestamp.now(),
+      });
+      return NextResponse.json({
+        success: true,
+        message: `Week ${weekNumber} follow-up sent`,
+        type: "invoice_late_weekly",
+        weekNumber,
+      });
+    }
+
+    // Default: send initial email
     await sendInvoiceEmail({
-      invoice: {
-        id: invoiceId,
-        userId: businessId || "",
-        customerName: (data.customerName as string) || "Customer",
-        customerEmail: (data.customerEmail as string) ?? "",
-        amount: (data.amount as number) ?? 0,
-        dueAt: data.dueAt instanceof Timestamp ? data.dueAt.toDate() : new Date(String(data.dueAt ?? "")),
-        paymentLink: (data.paymentLink as string | null) ?? null,
-        invoiceNumber: (data.invoiceNumber as string) || invoiceId.slice(0, 8),
-      },
+      invoice: invoicePayload,
       type: "invoice_initial",
+    });
+    const autoDays = (typeof (data.autoChaseDays as number) === "number" ? (data.autoChaseDays as number) : 1) as number;
+    const nextRun = new Date(now.getTime() + autoDays * 86400000);
+    await invoiceRef.update({
+      lastChasedAt: Timestamp.fromDate(now),
+      chaseCount: FieldValue.increment(1),
+      nextChaseAt: Timestamp.fromDate(nextRun),
+      updatedAt: Timestamp.now(),
     });
 
     return NextResponse.json({
