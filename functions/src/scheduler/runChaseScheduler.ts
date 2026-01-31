@@ -163,12 +163,12 @@ export async function runChaseSchedulerLogic(): Promise<void> {
 
     let processed = 0;
     let sent = 0;
-    let candidatesFound = snap.size;
+    const candidatesFound = snap.size;
     let candidatesMissingNextChaseAt = 0;
-    let candidatesFilteredOutPaid = 0; // query already excludes paid (status in pending/overdue)
+    const candidatesFilteredOutPaid = 0; // query already excludes paid (status in pending/overdue)
     let candidatesFilteredOutNoEmail = 0;
     let candidatesFilteredOutNoDueAt = 0;
-    let candidatesFilteredOutPlanLimit = 0; // scheduler does not apply plan limit
+    const candidatesFilteredOutPlanLimit = 0; // scheduler does not apply plan limit
     const skipReasons: Record<string, number> = {
       locked: 0,
       lastChasedAt: 0,

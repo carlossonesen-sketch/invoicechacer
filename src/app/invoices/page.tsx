@@ -12,7 +12,6 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Currency } from "@/components/ui/currency";
 import { DateLabel } from "@/components/ui/date-label";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
 import { toJsDate } from "@/lib/dates";
@@ -24,8 +23,7 @@ export default function InvoicesPage() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "overdue" | "paid">("pending");
+  const [statusFilter, setStatusFilter] = useState<"pending" | "overdue" | "paid">("pending");
   const [allInvoices, setAllInvoices] = useState<FirestoreInvoice[]>([]);
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | undefined>(undefined);
   const [hasMore, setHasMore] = useState(false);
@@ -125,41 +123,18 @@ export default function InvoicesPage() {
     };
   }, [user, router, invoiceRetryCount]);
 
-    // Filter invoices client-side (since we already have userId filter from query)
+    // Filter invoices by status only (pending, overdue, paid)
   const filteredInvoices = useMemo(() => {
-    let filtered = allInvoices;
-
-    // Apply search filter (customer name, email, invoice ID — same for all status tabs)
-    if (search.trim()) {
-      const searchLower = search.toLowerCase();
-      filtered = filtered.filter(inv =>
-        inv.customerName.toLowerCase().includes(searchLower) ||
-        inv.customerEmail.toLowerCase().includes(searchLower) ||
-        inv.id.toLowerCase().includes(searchLower)
-      );
-    }
-
-    // Apply status filter: All => both pending and paid; Pending/Overdue/Paid => filter by status
-    if (statusFilter !== "all") {
-      const now = new Date();
-      filtered = filtered.filter(inv => {
-        if (statusFilter === "overdue") {
-          const dueDate = toJsDate(inv.dueAt) || new Date();
-          return !invoiceIsPaid(inv) && dueDate < now;
-        }
-        if (statusFilter === "paid") return invoiceIsPaid(inv);
-        return inv.status === statusFilter;
-      });
-    }
-
-    // Dev-only: log filter + counts for verification (search includes both pending and paid when All)
-    if (process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
-      const paidCount = filtered.filter(inv => invoiceIsPaid(inv)).length;
-      console.log("[invoices list] statusFilter:", statusFilter, "filteredCount:", filtered.length, "paidInFiltered:", paidCount);
-    }
-
-    return filtered;
-  }, [allInvoices, search, statusFilter]);
+    const now = new Date();
+    return allInvoices.filter(inv => {
+      if (statusFilter === "overdue") {
+        const dueDate = toJsDate(inv.dueAt) || new Date();
+        return !invoiceIsPaid(inv) && dueDate < now;
+      }
+      if (statusFilter === "paid") return invoiceIsPaid(inv);
+      return inv.status === statusFilter; // pending
+    });
+  }, [allInvoices, statusFilter]);
 
   const handleLoadMore = useCallback(async () => {
     if (!user || !lastDoc || loadingMore || !hasMore) return;
@@ -280,37 +255,20 @@ export default function InvoicesPage() {
           )}
           {!invoiceLoadError && (
           <>
-          {/* Filters */}
+          {/* Status filter */}
           <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-2">
-                  Search
-                </label>
-                <Input
-                  id="search"
-                  type="text"
-                  placeholder="Customer name, email, or invoice ID..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-              <div>
-                <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-2">
-                  Status
-                </label>
-                <Select
-                  id="status"
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-                >
-                  <option value="all">All</option>
-                  <option value="pending">Pending</option>
-                  <option value="overdue">Overdue</option>
-                  <option value="paid">Paid</option>
-                </Select>
-              </div>
-            </div>
+            <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-2">
+              Status
+            </label>
+            <Select
+              id="status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            >
+              <option value="pending">Pending</option>
+              <option value="overdue">Overdue</option>
+              <option value="paid">Paid</option>
+            </Select>
           </div>
 
           {/* Invoices Table */}

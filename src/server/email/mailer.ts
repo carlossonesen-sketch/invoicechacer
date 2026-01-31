@@ -75,9 +75,9 @@ export async function sendEmail(input: SendEmailInput): Promise<{ messageId?: st
       fail("EMAIL_HTTP_REQUEST_FAILED", `Failed to call sendEmail endpoint: ${msg}`, 502);
     }
 
-    let data: any = null;
+    let data: { ok?: boolean; error?: { code?: string; message?: string }; messageId?: string } | null = null;
     try {
-      data = await response.json();
+      data = (await response.json()) as typeof data;
     } catch {
       // Non-JSON response; keep as null and surface generic error if not ok
     }

@@ -86,7 +86,8 @@ export default function PricingPage() {
   const searchParams = useSearchParams();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
-  const [trialExpiredBanner, setTrialExpiredBanner] = useState(false);
+  const trialExpiredBanner = searchParams.get("reason") === "trial_expired";
+  const [trialExpiredBannerFromApi, setTrialExpiredBannerFromApi] = useState(false);
   const { showToast, ToastComponent } = useToast();
 
   useEffect(() => {
@@ -97,16 +98,9 @@ export default function PricingPage() {
     return () => unsubscribe();
   }, []);
 
-  // Show "trial expired" banner when ?reason=trial_expired or when server says trialExpired && !isPaid
+  // Show "trial expired" banner from API when server says trialExpired && !isPaid (URL case is derived above)
   useEffect(() => {
-    if (searchParams.get("reason") === "trial_expired") {
-      setTrialExpiredBanner(true);
-      return;
-    }
-    if (!isLoggedIn || !auth?.currentUser) {
-      setTrialExpiredBanner(false);
-      return;
-    }
+    if (!isLoggedIn || !auth?.currentUser) return;
     let mounted = true;
     (async () => {
       try {
@@ -116,9 +110,9 @@ export default function PricingPage() {
         });
         if (!mounted) return;
         const data = (await res.json().catch(() => ({}))) as { trialExpired?: boolean; isPaid?: boolean };
-        setTrialExpiredBanner(!!(data.trialExpired && !data.isPaid));
+        setTrialExpiredBannerFromApi(!!(data.trialExpired && !data.isPaid));
       } catch {
-        if (mounted) setTrialExpiredBanner(false);
+        if (mounted) setTrialExpiredBannerFromApi(false);
       }
     })();
     return () => { mounted = false; };
@@ -155,7 +149,7 @@ export default function PricingPage() {
       }
 
       if (data.url) {
-        window.location.href = data.url;
+        window.location.assign(data.url);
       } else {
         showToast("Failed to redirect to checkout", "error");
         setLoading(null);
@@ -178,7 +172,7 @@ export default function PricingPage() {
     <div className="min-h-screen bg-gray-50">
       <Header title="Invoice Chaser" />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        {trialExpiredBanner && (
+        {(trialExpiredBanner || trialExpiredBannerFromApi) && (
           <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900" role="alert">
             <p className="font-semibold">Free trial expired — please subscribe to continue.</p>
           </div>

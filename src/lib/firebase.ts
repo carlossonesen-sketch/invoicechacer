@@ -35,7 +35,7 @@ if (typeof window !== "undefined") {
     db = initializeFirestore(app, {
       experimentalForceLongPolling: true,
       useFetchStreams: false,
-    } as any);
+    } as unknown as Parameters<typeof initializeFirestore>[1]);
   } else {
     // Firebase unavailable - do not initialize
     console.error("[Firebase] Missing required environment variables. Firebase features will be unavailable.");

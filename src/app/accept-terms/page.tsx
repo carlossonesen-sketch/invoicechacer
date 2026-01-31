@@ -16,10 +16,7 @@ export default function AcceptTermsPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!auth) {
-      setLoading(false);
-      return;
-    }
+    if (!auth) return;
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u ?? null);
       setLoading(false);
