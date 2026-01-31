@@ -18,6 +18,11 @@ export type SendEmailInput = {
 
 export type { MailerError } from "./providers/sesv2Mailer";
 
+type EmailHttpResponse = {
+  ok?: boolean;
+  error?: { code?: string; message?: string };
+} & Record<string, unknown>;
+
 function fail(code: string, message: string, status?: number): never {
   throw { code, message, status };
 }
@@ -75,11 +80,11 @@ export async function sendEmail(input: SendEmailInput): Promise<{ messageId?: st
       fail("EMAIL_HTTP_REQUEST_FAILED", `Failed to call sendEmail endpoint: ${msg}`, 502);
     }
 
-    let data: { ok?: boolean; error?: { code?: string; message?: string }; messageId?: string } | null = null;
+    let data: EmailHttpResponse | null = null;
     try {
-      data = (await response.json()) as typeof data;
+      data = (await response.json()) as EmailHttpResponse;
     } catch {
-      // Non-JSON response; keep as null and surface generic error if not ok
+      data = null;
     }
 
     const okFlag = data?.ok;

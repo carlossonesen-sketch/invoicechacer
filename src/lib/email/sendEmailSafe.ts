@@ -77,6 +77,8 @@ const getSendEmailUrl = (): string =>
  *
  * Returns messageId when available.
  */
+type EmailHttpResponse = { ok?: boolean; error?: { code?: string; message?: string }; messageId?: string } & Record<string, unknown>;
+
 async function sendEmailTransport(
   params: { to: string; subject: string; html?: string; text?: string; fromName?: string; replyTo?: string },
   logContext?: { invoiceId: string; type: string }
@@ -122,9 +124,9 @@ async function sendEmailTransport(
     );
   }
 
-  let data: { ok?: boolean; error?: { code?: string; message?: string }; messageId?: string } | null = null;
+  let data: EmailHttpResponse | null = null;
   try {
-    data = (await response.json()) as typeof data;
+    data = (await response.json()) as EmailHttpResponse;
   } catch {
     // Non-JSON response; keep as null and surface generic error if not ok
   }
