@@ -385,7 +385,7 @@ export const sendEmail = onRequest(async (req, res) => {
     return;
   }
 
-  let body: { to?: string; subject?: string; html?: string; text?: string };
+  let body: { to?: string; subject?: string; html?: string; text?: string; fromName?: string; replyTo?: string };
   try {
     body = typeof req.body === "object" && req.body ? req.body : JSON.parse(req.body || "{}");
   } catch {
@@ -393,9 +393,13 @@ export const sendEmail = onRequest(async (req, res) => {
     return;
   }
 
-  const { to, subject, html, text } = body;
+  const { to, subject, html, text, fromName, replyTo } = body;
   if (!to || !subject || typeof to !== "string" || typeof subject !== "string") {
     res.status(400).json({ error: "to and subject are required" });
+    return;
+  }
+  if (typeof html !== "string" || !html) {
+    res.status(400).json({ error: "html is required" });
     return;
   }
 
@@ -412,8 +416,10 @@ export const sendEmail = onRequest(async (req, res) => {
     const result = await sendEmailSes({
       to,
       subject,
-      html: typeof html === "string" ? html : "",
+      html,
       text: typeof text === "string" ? text : undefined,
+      fromName: typeof fromName === "string" ? fromName : undefined,
+      replyTo: typeof replyTo === "string" ? replyTo : undefined,
     });
     res.status(200).json({ ok: true, messageId: result.messageId });
   } catch (e) {

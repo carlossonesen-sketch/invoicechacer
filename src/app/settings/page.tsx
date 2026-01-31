@@ -132,6 +132,17 @@ export default function SettingsPage() {
             )}
           </div>
 
+          {/* Account / Security */}
+          <div className="bg-white rounded-lg border border-gray-200 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Account</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Change your password. You will need to enter your current password.
+            </p>
+            <Button variant="secondary" onClick={() => router.push("/settings/account")}>
+              Change password
+            </Button>
+          </div>
+
           {/* Billing Section */}
           <div className="bg-white rounded-lg border border-gray-200 p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Billing</h3>

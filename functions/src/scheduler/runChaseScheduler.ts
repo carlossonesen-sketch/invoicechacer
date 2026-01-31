@@ -345,14 +345,45 @@ export async function runChaseSchedulerLogic(): Promise<void> {
 
         logFirstFive("send");
 
-        const template = renderChaseEmail(next.type, {
-          customerName,
-          customerEmail,
-          amount,
-          dueAt,
-          paymentLink,
-          invoiceNumber,
-        }, next.weekNumber);
+        let companyName = "Invoice Chaser";
+        let companyEmail = "support@invoicechaser.online";
+        let companyPhone = "";
+        try {
+          const profileSnap = await db.collection("businessProfiles").doc(uid).get();
+          const profile = profileSnap.data() as { companyName?: string; companyEmail?: string | null; phone?: string | null } | undefined;
+          if (profile) {
+            if (typeof profile.companyName === "string" && profile.companyName.trim()) {
+              companyName = profile.companyName.trim();
+            }
+            if (typeof profile.companyEmail === "string" && profile.companyEmail.trim()) {
+              companyEmail = profile.companyEmail.trim();
+            }
+            if (typeof profile.phone === "string" && profile.phone.trim()) {
+              companyPhone = profile.phone.trim();
+            }
+          }
+        } catch {
+          /* keep fallbacks */
+        }
+
+        const template = renderChaseEmail(
+          next.type,
+          {
+            customerName,
+            customerEmail,
+            amount,
+            dueAt,
+            paymentLink,
+            invoiceNumber,
+          },
+          next.weekNumber,
+          companyName,
+          companyEmail,
+          companyPhone
+        );
+
+        const fromName = `${companyName} (via Invoice Chaser)`;
+        const replyTo = companyEmail;
 
         if (dryRun) {
           functions.logger.info(
@@ -378,6 +409,8 @@ export async function runChaseSchedulerLogic(): Promise<void> {
             subject: template.subject,
             html: template.html,
             text: template.text,
+            fromName,
+            replyTo,
           });
           messageId = sendResult.messageId;
           functions.logger.info("[runChaseScheduler] sent", {

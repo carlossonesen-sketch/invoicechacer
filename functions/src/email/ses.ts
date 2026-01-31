@@ -38,23 +38,40 @@ function getClient(): SESv2Client {
   return _client;
 }
 
+const DEFAULT_FROM_NAME = "Invoice Chaser";
+const SUPPORT_EMAIL = "support@invoicechaser.online";
+
+/**
+ * Sanitize fromName to prevent header injection: remove CR/LF and trim.
+ */
+function sanitizeFromName(name: string | undefined): string {
+  if (name == null || typeof name !== "string") return DEFAULT_FROM_NAME;
+  const trimmed = name.replace(/\r|\n/g, "").trim();
+  return trimmed || DEFAULT_FROM_NAME;
+}
+
 /**
  * Send email via Amazon SESv2.
  * Requires in process.env: AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, SES_FROM_EMAIL.
  * Optional: AWS_SESSION_TOKEN (for temporary credentials).
+ * Optional fromName: display name for From (default "Invoice Chaser"). From address remains SES_FROM_EMAIL or support@invoicechaser.online.
+ * Optional replyTo: Reply-To header.
  */
 export async function sendEmailSes(input: {
   to: string;
   subject: string;
   html: string;
   text?: string;
+  fromName?: string;
   replyTo?: string;
 }): Promise<{ messageId?: string }> {
-  const from = process.env.SES_FROM_EMAIL?.trim();
-  if (!from) throw new Error("SES: SES_FROM_EMAIL is required");
+  const fromName = sanitizeFromName(input.fromName);
+  const envFrom = process.env.SES_FROM_EMAIL?.trim();
+  const fromEmail = envFrom && envFrom.length > 3 ? envFrom : SUPPORT_EMAIL;
+  const from = `"${fromName}" <${fromEmail}>`;
 
   const text = input.text ?? stripHtml(input.html);
-  const replyTo = input.replyTo ? [input.replyTo] : undefined;
+  const replyTo = input.replyTo?.trim() ? [input.replyTo.trim()] : undefined;
 
   const client = getClient();
   const command = new SendEmailCommand({

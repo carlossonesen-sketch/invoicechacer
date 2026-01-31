@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, FormEvent, useEffect } from "react";
+import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, firebaseUnavailable } from "@/lib/firebase";
@@ -181,6 +182,13 @@ export default function LoginPage() {
                     error={!!error}
                   />
                 </FormField>
+                {!isCreating && (
+                  <p className="text-sm">
+                    <Link href="/forgot-password" className="text-blue-600 hover:text-blue-800 font-medium">
+                      Forgot password?
+                    </Link>
+                  </p>
+                )}
                 {isCreating ? (
                   <button
                     type="button"

@@ -24,7 +24,7 @@ function isTrialAllowlisted(pathname: string): boolean {
 }
 
 /** Paths unauthenticated users may access (others redirect to login). */
-const UNAUTH_PUBLIC_PREFIXES = ["/", "/login", "/pricing"] as const;
+const UNAUTH_PUBLIC_PREFIXES = ["/", "/login", "/forgot-password", "/pricing", "/terms", "/privacy"] as const;
 
 function isUnauthPublic(pathname: string): boolean {
   if (pathname === "/") return true;
@@ -59,6 +59,25 @@ export async function middleware(request: NextRequest) {
   // Authenticated on login page -> send home
   if (pathname === "/login") {
     return NextResponse.redirect(new URL("/", request.url));
+  }
+
+  // Terms acceptance gate: authenticated users must have accepted current terms
+  const TERMS_ALLOWLIST = ["/accept-terms", "/terms", "/privacy"] as const;
+  const isTermsAllowlisted = TERMS_ALLOWLIST.some((p) => pathname === p || pathname.startsWith(p + "/"));
+  if (!isTermsAllowlisted) {
+    try {
+      const termsStatusUrl = new URL("/api/auth/terms-status", request.url);
+      const termsRes = await fetch(termsStatusUrl.toString(), {
+        headers: { Cookie: request.headers.get("cookie") ?? "" },
+        cache: "no-store",
+      });
+      const termsData = (await termsRes.json()) as { accepted?: boolean };
+      if (!termsData.accepted) {
+        return NextResponse.redirect(new URL("/accept-terms", request.url));
+      }
+    } catch {
+      // On failure, allow through to avoid blocking
+    }
   }
 
   // Trial-expired paywall: if path is allowlisted, continue; else check trial and redirect if expired+not paid

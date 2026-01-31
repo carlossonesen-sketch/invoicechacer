@@ -129,20 +129,17 @@ export default function InvoicesPage() {
   const filteredInvoices = useMemo(() => {
     let filtered = allInvoices;
 
-    // Apply search filter
+    // Apply search filter (customer name, email, invoice ID — same for all status tabs)
     if (search.trim()) {
       const searchLower = search.toLowerCase();
-      filtered = filtered.filter(inv => 
+      filtered = filtered.filter(inv =>
         inv.customerName.toLowerCase().includes(searchLower) ||
         inv.customerEmail.toLowerCase().includes(searchLower) ||
         inv.id.toLowerCase().includes(searchLower)
       );
     }
 
-    // Exclude paid invoices by default; use invoiceIsPaid for consistency
-    filtered = filtered.filter(inv => !invoiceIsPaid(inv));
-
-    // Apply status filter (including computed overdue)
+    // Apply status filter: All => both pending and paid; Pending/Overdue/Paid => filter by status
     if (statusFilter !== "all") {
       const now = new Date();
       filtered = filtered.filter(inv => {
@@ -153,6 +150,12 @@ export default function InvoicesPage() {
         if (statusFilter === "paid") return invoiceIsPaid(inv);
         return inv.status === statusFilter;
       });
+    }
+
+    // Dev-only: log filter + counts for verification (search includes both pending and paid when All)
+    if (process.env.NODE_ENV !== "production" && process.env.NEXT_PUBLIC_DEV_TOOLS === "1") {
+      const paidCount = filtered.filter(inv => invoiceIsPaid(inv)).length;
+      console.log("[invoices list] statusFilter:", statusFilter, "filteredCount:", filtered.length, "paidInFiltered:", paidCount);
     }
 
     return filtered;

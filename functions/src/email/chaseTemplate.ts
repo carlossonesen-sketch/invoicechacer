@@ -40,10 +40,49 @@ function paymentLinkText(link: string | null | undefined): string {
   return `\n\nPayment Link: ${link}`;
 }
 
+function buildCompanyFooterText(companyName?: string, companyEmail?: string, companyPhone?: string): string {
+  const name = (companyName ?? "").trim() || "the business";
+  const email = (companyEmail ?? "").trim();
+  if (!email) return "";
+
+  const optionalPhonePart = companyPhone?.trim() ? ` or ${companyPhone.trim()}` : "";
+  const questionsLine = `Questions? Contact ${name} at ${email}${optionalPhonePart}.`;
+  const lines = ["---", questionsLine, name, email];
+  if (companyPhone?.trim()) lines.push(companyPhone.trim());
+  return "\n\n" + lines.join("\n");
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function buildCompanyFooterHtml(companyName?: string, companyEmail?: string, companyPhone?: string): string {
+  const name = (companyName ?? "").trim() || "the business";
+  const email = (companyEmail ?? "").trim();
+  if (!email) return "";
+
+  const optionalPhonePart = companyPhone?.trim() ? ` or ${escapeHtml(companyPhone.trim())}` : "";
+  const questionsPart = `Contact ${name} at <a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>${optionalPhonePart}.`;
+  const blockParts = [`<strong>${escapeHtml(name)}</strong><br />`, `<a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`];
+  if (companyPhone?.trim()) blockParts.push(`<br />${escapeHtml(companyPhone.trim())}`);
+
+  return `
+<hr style="margin-top:24px; border:none; border-top:1px solid #e5e7eb;" />
+<p style="margin:12px 0 0; font-size:14px; color:#374151;">
+  <strong>Questions?</strong> ${questionsPart}
+</p>
+<p style="margin:8px 0 0; font-size:13px; color:#6b7280;">
+  ${blockParts.join("")}
+</p>`.trim();
+}
+
 export function renderChaseEmail(
   type: "invoice_reminder" | "invoice_due" | "invoice_late_weekly",
   invoice: ChaseInvoice,
-  weekNumber?: number
+  weekNumber?: number,
+  companyName?: string,
+  companyEmail?: string,
+  companyPhone?: string
 ): ChaseTemplateResult {
   const amount = formatAmount(invoice.amount);
   const dueDate = formatDueDate(invoice.dueAt);
@@ -74,7 +113,7 @@ export function renderChaseEmail(
       subject = `Week ${weekNumber} Follow-up: Invoice #${num} - ${amount}`;
       greeting = `Hi ${name},`;
       body = `I wanted to follow up on invoice #${num} for ${amount}, which was due on ${dueDate}. This is our Week ${weekNumber} follow-up (${w} week).`;
-      closing = `I'm happy to work with you on a payment plan if needed. Please let me know if you'd like to discuss options.`;
+      closing = `If you have any questions or would like to discuss, please reply to this email.`;
       break;
     default:
       throw new Error(`Unknown chase type: ${type}`);
@@ -95,10 +134,12 @@ export function renderChaseEmail(
     </div>
     <p style="margin: 16px 0 0 0;">${closing}</p>
     ${paymentLinkHtml(invoice.paymentLink)}
-    <p style="margin: 32px 0 0 0; font-size: 14px; color: #6b7280;">Best regards,<br>Invoice Chaser</p>
+    <p style="margin: 32px 0 0 0; font-size: 14px; color: #6b7280;">Best regards,<br>${companyName?.trim() || "Invoice Chaser"}</p>
+    ${companyEmail ? buildCompanyFooterHtml(companyName, companyEmail, companyPhone) : ""}
   </div>
 </body></html>`.trim();
 
+  const footerText = companyEmail ? buildCompanyFooterText(companyName, companyEmail, companyPhone) : "";
   const text = [
     greeting,
     "",
@@ -112,7 +153,8 @@ export function renderChaseEmail(
     closing + paymentLinkText(invoice.paymentLink),
     "",
     "Best regards,",
-    "Invoice Chaser",
+    companyName?.trim() || "Invoice Chaser",
+    footerText,
   ].join("\n");
 
   return { subject, html, text };

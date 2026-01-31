@@ -2,9 +2,12 @@
  * Send invoice email using templates and safe wrapper
  */
 
-import { getAdminFirestore } from "@/lib/firebase-admin";
+import { getAuth } from "firebase-admin/auth";
+import { getAdminApp, getAdminFirestore } from "@/lib/firebase-admin";
 import { sendEmailSafe } from "./sendEmailSafe";
 import { renderInvoiceEmail } from "./templates/invoiceTemplates";
+
+const SUPPORT_EMAIL = "support@invoicechaser.online";
 
 export interface InvoiceForEmailSend {
   id: string;
@@ -29,15 +32,27 @@ export interface SendInvoiceEmailParams {
 export async function sendInvoiceEmail(params: SendInvoiceEmailParams): Promise<void> {
   const { invoice, type, weekNumber } = params;
 
-  // Resolve business profile for personalization (company name)
+  // Business profile: businessProfiles/{uid}, fields companyName, companyEmail, phone
   let businessName: string | undefined;
+  let companyName = "";
+  let companyEmail = "";
+  let companyPhone = "";
   try {
     const db = getAdminFirestore();
     if (db && invoice.userId) {
       const snap = await db.collection("businessProfiles").doc(invoice.userId).get();
-      const data = snap.data() as { companyName?: string } | undefined;
-      if (data && typeof data.companyName === "string" && data.companyName.trim()) {
-        businessName = data.companyName.trim();
+      const data = snap.data() as { companyName?: string; companyEmail?: string | null; phone?: string | null } | undefined;
+      if (data) {
+        if (typeof data.companyName === "string" && data.companyName.trim()) {
+          businessName = data.companyName.trim();
+          companyName = businessName;
+        }
+        if (typeof data.companyEmail === "string" && data.companyEmail.trim()) {
+          companyEmail = data.companyEmail.trim();
+        }
+        if (typeof data.phone === "string" && data.phone.trim()) {
+          companyPhone = data.phone.trim();
+        }
       }
     }
   } catch (error) {
@@ -48,7 +63,22 @@ export async function sendInvoiceEmail(params: SendInvoiceEmailParams): Promise<
     });
   }
 
-  // Render email template
+  let userEmail = "";
+  if (invoice.userId) {
+    try {
+      const userRecord = await getAuth(getAdminApp()).getUser(invoice.userId);
+      if (userRecord.email?.trim()) userEmail = userRecord.email.trim();
+    } catch {
+      /* ignore */
+    }
+  }
+  companyEmail = companyEmail || userEmail || SUPPORT_EMAIL;
+  if (!companyName) companyName = "the business";
+
+  const fromName = `${companyName} (via Invoice Chaser)`;
+  const replyTo = companyEmail;
+
+  // Render email template (footer built inside from companyName, companyEmail, companyPhone)
   const template = renderInvoiceEmail({
     type,
     invoice: {
@@ -62,9 +92,11 @@ export async function sendInvoiceEmail(params: SendInvoiceEmailParams): Promise<
       businessName,
     },
     weekNumber,
+    companyName,
+    companyEmail,
+    companyPhone,
   });
 
-  // Send via safe wrapper
   await sendEmailSafe({
     userId: invoice.userId,
     invoiceId: invoice.id,
@@ -74,5 +106,7 @@ export async function sendInvoiceEmail(params: SendInvoiceEmailParams): Promise<
     text: template.text,
     type,
     metadata: weekNumber !== undefined ? { weekNumber } : undefined,
+    fromName,
+    replyTo,
   });
 }

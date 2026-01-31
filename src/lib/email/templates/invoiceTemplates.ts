@@ -70,6 +70,50 @@ function renderPaymentLinkText(paymentLink: string | null | undefined): string {
   return `\n\nPayment Link: ${paymentLink}`;
 }
 
+type CompanyContact = { companyName?: string; companyEmail?: string; companyPhone?: string };
+
+function buildCompanyFooterText(c: CompanyContact): string {
+  const companyName = (c.companyName ?? "").trim() || "the business";
+  const companyEmail = (c.companyEmail ?? "").trim();
+  if (!companyEmail) return "";
+
+  const optionalPhonePart = c.companyPhone?.trim() ? ` or ${c.companyPhone.trim()}` : "";
+  const questionsLine = `Questions? Contact ${companyName} at ${companyEmail}${optionalPhonePart}.`;
+
+  const lines = ["---", questionsLine, companyName, companyEmail];
+  if (c.companyPhone?.trim()) lines.push(c.companyPhone.trim());
+  return "\n\n" + lines.join("\n");
+}
+
+function buildCompanyFooterHtml(c: CompanyContact): string {
+  const companyName = (c.companyName ?? "").trim() || "the business";
+  const companyEmail = (c.companyEmail ?? "").trim();
+  if (!companyEmail) return "";
+
+  const optionalPhonePart = c.companyPhone?.trim() ? ` or ${escapeHtml(c.companyPhone.trim())}` : "";
+  const questionsPart = `Contact ${escapeHtml(companyName)} at <a href="mailto:${escapeHtml(companyEmail)}">${escapeHtml(companyEmail)}</a>${optionalPhonePart}.`;
+
+  const blockParts = [`<strong>${escapeHtml(companyName)}</strong><br/>`, `<a href="mailto:${escapeHtml(companyEmail)}">${escapeHtml(companyEmail)}</a><br/>`];
+  if (c.companyPhone?.trim()) blockParts.push(escapeHtml(c.companyPhone.trim()));
+
+  return `
+<hr style="margin-top:24px;border:none;border-top:1px solid #e5e7eb;" />
+<p style="margin:12px 0 0;font-size:14px;color:#374151;">
+  <strong>Questions?</strong> ${questionsPart}
+</p>
+<p style="margin:8px 0 0;font-size:13px;color:#6b7280;">
+  ${blockParts.join("")}
+</p>`.trim();
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 /**
  * Render initial invoice email
  */
@@ -82,8 +126,15 @@ export function renderInvoiceEmail(params: {
     | "invoice_late_weekly";
   invoice: InvoiceForEmail;
   weekNumber?: number;
+  /** Optional company info for footer (appended to HTML + text) */
+  companyName?: string;
+  companyEmail?: string;
+  companyPhone?: string;
 }): EmailTemplateResult {
-  const { type, invoice, weekNumber } = params;
+  const { type, invoice, weekNumber, companyName, companyEmail, companyPhone } = params;
+  const contact: CompanyContact = { companyName, companyEmail, companyPhone };
+  const footerHtml = companyEmail ? buildCompanyFooterHtml(contact) : "";
+  const footerText = companyEmail ? buildCompanyFooterText(contact) : "";
   const amount = formatAmount(invoice.amount);
   const dueDate = formatDueDate(invoice.dueAt);
   const customerName = invoice.customerName || "Customer";
@@ -135,7 +186,7 @@ export function renderInvoiceEmail(params: {
       subject = `Week ${weekNumber} Follow-up: Invoice #${invoiceNumber} - ${amount}`;
       greeting = `Hi ${customerName},`;
       body = `I wanted to follow up on invoice #${invoiceNumber} for ${amount}, which was due on ${dueDate}. This is our Week ${weekNumber} follow-up (${weekText} week).`;
-      closing = `I understand that sometimes things come up, and I'm happy to work with you on a payment plan if needed. Please let me know if you'd like to discuss options or if you have any questions.`;
+      closing = `I understand that sometimes things come up. If you have any questions or would like to discuss, please reply to this email.`;
       break;
 
     default:
@@ -165,6 +216,7 @@ export function renderInvoiceEmail(params: {
     <p style="margin: 16px 0 0 0; font-size: 16px;">${closing}</p>
     ${paymentLinkHTML}
     <p style="margin: 32px 0 0 0; font-size: 14px; color: #6b7280;">Best regards,<br>${businessName}</p>
+    ${footerHtml}
   </div>
 </body>
 </html>
@@ -183,7 +235,7 @@ Invoice Details:
 ${closing}${paymentLinkText}
 
 Best regards,
-${businessName}
+${businessName}${footerText}
   `.trim();
 
   return { subject, html, text };

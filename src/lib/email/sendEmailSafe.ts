@@ -26,6 +26,10 @@ export interface SendEmailParams {
   subject: string;
   html?: string;
   text?: string;
+  /** From display name (e.g. "Acme (via Invoice Chaser)"). Passed to sendEmail endpoint. */
+  fromName?: string;
+  /** Reply-To address. Passed to sendEmail endpoint. */
+  replyTo?: string;
   type:
     | "invoice"
     | "chase"
@@ -74,7 +78,7 @@ const getSendEmailUrl = (): string =>
  * Returns messageId when available.
  */
 async function sendEmailTransport(
-  params: { to: string; subject: string; html?: string; text?: string },
+  params: { to: string; subject: string; html?: string; text?: string; fromName?: string; replyTo?: string },
   logContext?: { invoiceId: string; type: string }
 ): Promise<string | undefined> {
   const url = getSendEmailUrl();
@@ -87,7 +91,7 @@ async function sendEmailTransport(
     );
   }
 
-  const body = {
+  const body: Record<string, unknown> = {
     to: params.to,
     subject: params.subject,
     html: params.html,
@@ -97,6 +101,8 @@ async function sendEmailTransport(
       type: logContext?.type,
     },
   };
+  if (params.fromName != null) body.fromName = params.fromName;
+  if (params.replyTo != null) body.replyTo = params.replyTo;
 
   let response: Response;
   try {
@@ -185,7 +191,7 @@ async function writeEmailEvent(event: EmailEvent): Promise<void> {
  */
 export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
   const config = getEmailConfig();
-  const { userId, invoiceId, to, subject, html, text, type, metadata } = params;
+  const { userId, invoiceId, to, subject, html, text, type, metadata, fromName, replyTo } = params;
 
   // Step 0: Hard guard - verify invoice status is "pending"
   // This prevents emails from being sent to paid or overdue invoices
@@ -331,7 +337,7 @@ export async function sendEmailSafe(params: SendEmailParams): Promise<void> {
 
   try {
     const messageId = await sendEmailTransport(
-      { to: finalEmail, subject, html, text },
+      { to: finalEmail, subject, html, text, fromName, replyTo },
       { invoiceId, type }
     );
 
