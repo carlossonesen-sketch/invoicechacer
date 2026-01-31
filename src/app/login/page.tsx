@@ -41,39 +41,48 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
 
+    const fd = new FormData(e.currentTarget as HTMLFormElement);
+    const emailValue = String(fd.get("email") ?? "").trim();
+    const passwordValue = String(fd.get("password") ?? "");
+
     if (firebaseUnavailable || !auth) {
       setError("Firebase configuration is missing. Please check your environment variables.");
       return;
     }
 
-    if (!email.trim()) {
+    if (!emailValue.trim()) {
       setError("Email is required");
       return;
     }
 
-    if (!isValidEmail(email)) {
+    if (!isValidEmail(emailValue)) {
       setError("Please enter a valid email address");
       return;
     }
 
-    if (!password.trim()) {
+    if (!passwordValue.trim()) {
       setError("Password is required");
       return;
     }
 
-    if (password.length < 6) {
+    if (passwordValue.length < 6) {
       setError("Password must be at least 6 characters");
       return;
     }
 
     setLoading(true);
+    const devLog = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
     try {
       let userCredential;
 
       if (isCreating) {
-        userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        userCredential = await createUserWithEmailAndPassword(auth, emailValue.trim(), passwordValue);
+        if (devLog) {
+          const u = userCredential.user;
+          console.log("[AUTH DEV] signup ok", { uid: u.uid, providerData: u.providerData?.map((p) => ({ providerId: p.providerId, email: p.email })) });
+        }
       } else {
-        userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
+        userCredential = await signInWithEmailAndPassword(auth, emailValue.trim(), passwordValue);
       }
 
       const idToken = await userCredential.user.getIdToken();
@@ -98,28 +107,27 @@ export default function LoginPage() {
       }
 
       if (pathname === "/login") {
-        const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
         try {
           const profileRes = await fetch("/api/business-profile", {
             headers: { Authorization: `Bearer ${idToken}` },
           });
           const profileData = (await profileRes.json().catch(() => ({}))) as { exists?: boolean; error?: string; message?: string };
           if (!profileRes.ok) {
-            if (devToolsEnabled) console.log("[redirect->dashboard]", { pathname, reason: "Profile API error" });
+            if (devLog) console.log("[redirect->dashboard]", { pathname, reason: "Profile API error" });
             router.replace("/dashboard");
             router.refresh();
             return;
           }
           if (!profileData.exists) {
-            if (devToolsEnabled) console.log("[redirect->onboarding]", { pathname, reason: "No profile" });
+            if (devLog) console.log("[redirect->onboarding]", { pathname, reason: "No profile" });
             router.replace("/onboarding/company");
           } else {
-            if (devToolsEnabled) console.log("[redirect->dashboard]", { pathname, reason: "Profile exists" });
+            if (devLog) console.log("[redirect->dashboard]", { pathname, reason: "Profile exists" });
             router.replace("/dashboard");
           }
         } catch (profileError) {
           console.error("Failed to check business profile:", profileError);
-          if (devToolsEnabled) console.log("[redirect->dashboard]", { pathname, reason: "Profile check failed" });
+          if (devLog) console.log("[redirect->dashboard]", { pathname, reason: "Profile check failed" });
           router.replace("/dashboard");
         }
         router.refresh();
@@ -127,6 +135,7 @@ export default function LoginPage() {
     } catch (err: unknown) {
       console.error("Auth error:", err);
       const errorCode = err && typeof err === "object" && "code" in err ? String(err.code) : undefined;
+      if (devLog) console.log("[AUTH DEV] login/signup error", { errorCode });
       if (errorCode === "auth/user-not-found") {
         setError("No account found with this email. Toggle \"Create account\" to sign up.");
       } else if (errorCode === "auth/wrong-password") {
@@ -162,6 +171,7 @@ export default function LoginPage() {
                 <FormField label="Email" htmlFor="email" required error={error}>
                   <Input
                     id="email"
+                    name="email"
                     type="email"
                     placeholder="you@example.com"
                     value={email}
@@ -174,6 +184,7 @@ export default function LoginPage() {
                 <FormField label="Password" htmlFor="password" required>
                   <Input
                     id="password"
+                    name="password"
                     type="password"
                     placeholder="Enter your password"
                     value={password}

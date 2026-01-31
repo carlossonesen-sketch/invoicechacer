@@ -19,33 +19,46 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setError("");
 
+    const fd = new FormData(e.currentTarget as HTMLFormElement);
+    const emailValue = String(fd.get("email") ?? "").trim();
+
     if (firebaseUnavailable || !auth) {
       setError("Firebase configuration is missing. Please check your environment variables.");
       return;
     }
 
-    if (!email.trim()) {
+    if (!emailValue) {
       setError("Email is required");
       return;
     }
 
-    if (!isValidEmail(email)) {
+    if (!isValidEmail(emailValue)) {
       setError("Please enter a valid email address");
       return;
     }
 
     setLoading(true);
+    const devLog = process.env.NEXT_PUBLIC_DEV_TOOLS === "1";
     try {
-      await sendPasswordResetEmail(auth, email.trim());
+      await sendPasswordResetEmail(auth, emailValue);
+      if (devLog) console.log("[AUTH DEV] sendPasswordResetEmail resolved");
       setSubmitted(true);
     } catch (err: unknown) {
       const code = err && typeof err === "object" && "code" in err ? String((err as { code?: string }).code) : "";
+      if (devLog) console.log("[AUTH DEV] sendPasswordResetEmail error", { code });
+      if (code === "auth/user-not-found") {
+        setSubmitted(true);
+        return;
+      }
       if (code === "auth/invalid-email") {
         setError("Please enter a valid email address.");
         return;
       }
-      // Do not reveal whether the account exists; show generic success for all other errors
-      setSubmitted(true);
+      if (code === "auth/too-many-requests") {
+        setError("Too many attempts. Please try again later.");
+        return;
+      }
+      setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -57,7 +70,7 @@ export default function ForgotPasswordPage() {
         <div className="max-w-md w-full bg-white rounded-xl shadow-lg border border-gray-200 p-6 sm:p-8 text-center">
           <h1 className="text-xl font-semibold text-gray-900 mb-2">Check your email</h1>
           <p className="text-sm text-gray-600 mb-6">
-            If an account exists for that email, we sent a password reset link.
+            Check your email for a reset link. If you don&apos;t see it, check spam or try again.
           </p>
           <Link
             href="/login"
@@ -81,6 +94,7 @@ export default function ForgotPasswordPage() {
           <FormField label="Email" htmlFor="email" required error={error}>
             <Input
               id="email"
+              name="email"
               type="email"
               placeholder="you@example.com"
               value={email}
