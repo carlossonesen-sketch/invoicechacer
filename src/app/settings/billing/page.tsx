@@ -10,7 +10,6 @@ import { Header } from "@/components/layout/header";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { useEntitlements } from "@/hooks/useEntitlements";
-import { EntitlementsService } from "@/lib/entitlements";
 
 type PlanId = "starter" | "pro" | "business" | "free";
 
@@ -61,7 +60,6 @@ const planPrices: Record<PlanId, number> = {
 export default function BillingPage() {
   const router = useRouter();
   const { isPro, loading } = useEntitlements();
-  const [isDev, setIsDev] = useState(false);
   const [planFromFirestore, setPlanFromFirestore] = useState<PlanId | null>(null);
   const [loadingPlan, setLoadingPlan] = useState(true);
   const [trialEndsAt, setTrialEndsAt] = useState<Date | null>(null);
@@ -178,11 +176,6 @@ export default function BillingPage() {
   
   const planLimitsData = planLimits[currentPlan];
   const planPrice = planPrices[currentPlan];
-
-  useEffect(() => {
-    const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1" || process.env.NODE_ENV !== "production";
-    setIsDev(devToolsEnabled);
-  }, []);
 
   if (!user && !loadingPlan) {
     return (
@@ -379,30 +372,6 @@ export default function BillingPage() {
                 <Button onClick={() => router.push("/pricing")}>
                   View Pricing
                 </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Dev Toggle */}
-          {isDev && (
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
-              <h3 className="text-lg font-semibold text-yellow-900 mb-2">Development Tools</h3>
-              <p className="text-sm text-yellow-800 mb-4">
-                In development mode, you can toggle Pro status directly. This will be replaced with real billing integration.
-              </p>
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-yellow-900">
-                  Pro Status: {isPro ? "Enabled" : "Disabled"}
-                </span>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={isPro}
-                    onChange={(e) => EntitlementsService.setPro(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-yellow-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-yellow-600"></div>
-                </label>
               </div>
             </div>
           )}

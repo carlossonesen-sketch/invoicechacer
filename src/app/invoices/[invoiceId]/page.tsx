@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter, useParams, useSearchParams, usePathname } from "next/navigation";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, firebaseUnavailable } from "@/lib/firebase";
-import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, triggerChaseNow, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
+import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
 import { dateInputToTimestamp, timestampToDateInput, toJsDate } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
@@ -48,7 +48,6 @@ export default function InvoiceDetailPage() {
   const [upgradeModalMessage, setUpgradeModalMessage] = useState<string | undefined>(undefined);
   const { isPro } = useEntitlements();
   const [user, setUser] = useState<User | null>(null);
-  const [isDev, setIsDev] = useState(false);
   const [realtimePaused, setRealtimePaused] = useState(false);
   const didRedirectRef = useRef<boolean>(false);
   const mountedRef = useRef(true);
@@ -81,9 +80,6 @@ export default function InvoiceDetailPage() {
       return;
     }
     mountedRef.current = true;
-
-    const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1" || process.env.NODE_ENV !== "production";
-    setIsDev(devToolsEnabled);
 
     const authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) {
@@ -293,27 +289,6 @@ export default function InvoiceDetailPage() {
     } catch (error: unknown) {
       console.error("Failed to update invoice:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to update invoice. Please try again.";
-      setErrors({ submit: errorMessage });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-
-  async function handleTriggerChase() {
-    if (!invoice || !user) return;
-
-    setSaving(true);
-    setSuccessMessage("");
-    setErrors({});
-
-    try {
-      await triggerChaseNow(user.uid, invoice.id);
-      setSuccessMessage("Chase triggered successfully! The cloud function will process it on its next run.");
-      setTimeout(() => setSuccessMessage(""), 5000);
-    } catch (error: unknown) {
-      console.error("Failed to trigger chase:", error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to trigger chase. Please try again.";
       setErrors({ submit: errorMessage });
     } finally {
       setSaving(false);
@@ -867,23 +842,6 @@ export default function InvoiceDetailPage() {
                       </FormField>
                     </>
                   )}
-
-                  {/* Dev-only trigger button in edit mode */}
-                  {isDev && formData.autoChaseEnabled && isPro && invoice.status !== "paid" && (
-                    <div className="pt-4 border-t border-gray-200">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={handleTriggerChase}
-                        disabled={saving}
-                      >
-                        {saving ? "Triggering..." : "Trigger Chase Now (Dev)"}
-                      </Button>
-                      <p className="mt-2 text-xs text-gray-500">
-                        Sets triggerChaseAt and chaseRequested flag. Cloud function will process on next run.
-                      </p>
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -1023,17 +981,6 @@ export default function InvoiceDetailPage() {
               <div className="pt-4 border-t border-gray-200">
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="text-md font-semibold text-gray-900">Auto-Chase Settings</h4>
-                  {isDev && invoice.autoChaseEnabled && invoice.status !== "paid" && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={handleTriggerChase}
-                      disabled={saving}
-                    >
-                      {saving ? "Triggering..." : "Trigger Chase Now (Dev)"}
-                    </Button>
-                  )}
                 </div>
                 <div className="grid grid-cols-3 gap-4">
                   <div>

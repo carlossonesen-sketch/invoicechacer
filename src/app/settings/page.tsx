@@ -9,26 +9,18 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEntitlements } from "@/hooks/useEntitlements";
-import { EntitlementsService } from "@/lib/entitlements";
 import { useToast } from "@/components/ui/toast";
 
 export default function SettingsPage() {
   const router = useRouter();
   const { isPro, loading } = useEntitlements();
   const { showToast, ToastComponent } = useToast();
-  const [saving, setSaving] = useState(false);
-  const [isDev, setIsDev] = useState(false);
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [cancelLoading, setCancelLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
-
-  useEffect(() => {
-    const devToolsEnabled = process.env.NEXT_PUBLIC_DEV_TOOLS === "1" || process.env.NODE_ENV !== "production";
-    setIsDev(devToolsEnabled);
-  }, []);
 
   useEffect(() => {
     if (!auth) return;
@@ -48,19 +40,6 @@ export default function SettingsPage() {
     });
     return () => unsubscribe();
   }, []);
-
-  function handleTogglePro() {
-    setSaving(true);
-    try {
-      const newValue = !isPro;
-      EntitlementsService.setPro(newValue);
-    } catch (error) {
-      console.error("Failed to update Pro status:", error);
-      alert("Failed to update Pro status. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   if (loading) {
     return (
@@ -107,29 +86,6 @@ export default function SettingsPage() {
                 {isPro ? "Pro" : "Free"}
               </div>
             </div>
-
-            {isDev && (
-              <div className="mt-6 pt-6 border-t border-gray-200">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium text-gray-900">Enable Pro (Dev)</div>
-                    <div className="text-sm text-gray-500 mt-1">
-                      Development mode toggle for testing Pro features
-                    </div>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isPro}
-                      onChange={handleTogglePro}
-                      disabled={saving}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                  </label>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Account / Security */}
@@ -179,21 +135,6 @@ export default function SettingsPage() {
               Delete account
             </Button>
           </div>
-
-          {/* Sync Section (for future) */}
-          {isDev && (
-            <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Sync to Cloud</h3>
-              <p className="text-sm text-gray-500 mb-4">
-                {isPro
-                  ? "Sync your data to the cloud for backup and cross-device access."
-                  : "Upgrade to Pro to sync your data to the cloud."}
-              </p>
-              <Button variant="secondary" disabled>
-                {isPro ? "Sync Now" : "Upgrade to Pro"}
-              </Button>
-            </div>
-          )}
         </div>
       </div>
       {ToastComponent}

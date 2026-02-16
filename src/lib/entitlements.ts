@@ -23,16 +23,14 @@ export function getIsPro(): boolean {
 }
 
 /**
- * Set Pro plan status
+ * Set Pro plan status. No-op in production; dev-only override for local testing.
  */
 export function setIsPro(value: boolean): void {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || process.env.NODE_ENV === "production") {
     return;
   }
-  
   try {
     localStorage.setItem(STORAGE_KEY, String(value));
-    // Dispatch event for components to react to changes
     window.dispatchEvent(new CustomEvent("entitlements-changed", { detail: { isPro: value } }));
   } catch (error) {
     console.error("Failed to set entitlements:", error);
