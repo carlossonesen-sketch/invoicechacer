@@ -13,6 +13,7 @@ import { getRequestId } from "@/lib/api/requestId";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { ApiError, isApiError } from "@/lib/api/ApiError";
 import { getInvoicesRef } from "@/lib/invoicePaths";
+import { parseEmailOverrides } from "@/lib/email/emailOverrides";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
@@ -77,7 +78,10 @@ export async function POST(request: NextRequest) {
       autoChaseEnabled,
       autoChaseDays,
       maxChases,
+      emailOverrides: emailOverridesRaw,
     } = body;
+
+    const emailOverrides = parseEmailOverrides(emailOverridesRaw);
 
     // Validate required fields
 
@@ -180,6 +184,7 @@ export async function POST(request: NextRequest) {
       ...(chaseStage != null && { chaseStage }),
       ...(chaseType != null && { chaseType }),
       ...(weekNumber != null && { weekNumber }),
+      ...(emailOverrides ? { emailOverrides } : {}),
     };
 
     const docRef = await invoicesRef.add(newInvoice);

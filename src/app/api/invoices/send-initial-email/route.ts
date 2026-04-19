@@ -13,6 +13,7 @@ import { isApiError } from "@/lib/api/ApiError";
 import { getAuthenticatedUserId } from "@/lib/api/auth";
 import { requireActiveTrialOrPaid } from "@/lib/api/trial";
 import { resolveInvoiceRefAndBusinessId } from "@/lib/invoicePaths";
+import { invoiceForEmailSendFromFirestore } from "@/lib/email/invoiceEmailPayloadServer";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
@@ -113,16 +114,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const invoicePayload = {
-      id: invoiceId,
-      userId: businessId || "",
-      customerName: (data.customerName as string) || "Customer",
-      customerEmail: (data.customerEmail as string) ?? "",
-      amount: (data.amount as number) ?? 0,
-      dueAt: dueAtDate,
-      paymentLink: (data.paymentLink as string | null) ?? null,
-      invoiceNumber: (data.invoiceNumber as string) || invoiceId.slice(0, 8),
-    };
+    const invoicePayload = invoiceForEmailSendFromFirestore(
+      data as Record<string, unknown>,
+      invoiceId,
+      businessId || ""
+    );
 
     // Overdue + no sends yet: send late_week_N based on days overdue (do not require initial/due first)
     if (dueAtDate < now && chaseCount === 0) {

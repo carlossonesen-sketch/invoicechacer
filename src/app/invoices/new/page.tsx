@@ -5,6 +5,14 @@ import { useRouter, usePathname } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { createInvoice } from "@/lib/invoices";
+import type { EmailOverrideKey } from "@/lib/email/emailOverrides";
+import {
+  buildEmailDraftsFromStored,
+  pickEmailOverridesToSave,
+  resetEmailDraftKind,
+  type EmailDraftsState,
+} from "@/lib/email/emailDraftUtils";
+import { InvoiceEmailPreviewSection } from "@/components/invoices/InvoiceEmailPreviewSection";
 import { dateInputToTimestamp, toJsDate } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
@@ -62,6 +70,29 @@ export default function NewInvoicePage() {
     autoChaseDays: 3,
     maxChases: 3,
   });
+
+  const [emailDrafts, setEmailDrafts] = useState<EmailDraftsState>(() => buildEmailDraftsFromStored(undefined));
+  const [emailKind, setEmailKind] = useState<EmailOverrideKey>("initial");
+  const [companyNameForPreview, setCompanyNameForPreview] = useState("Your business");
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch("/api/business-profile", { headers: { Authorization: `Bearer ${token}` } });
+        const data = (await res.json().catch(() => ({}))) as { exists?: boolean; profile?: { companyName?: string } };
+        if (cancelled || !data.exists || !data.profile?.companyName?.trim()) return;
+        setCompanyNameForPreview(data.profile.companyName.trim());
+      } catch {
+        /* keep default */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   useEffect(() => {
     // Check Firebase availability first
@@ -153,6 +184,8 @@ export default function NewInvoicePage() {
         return;
       }
       
+      const emailOverrides = pickEmailOverridesToSave(emailDrafts);
+
       const invoiceId = await createInvoice(user, {
         customerName: formData.customerName.trim(),
         customerEmail: formData.customerEmail.trim(),
@@ -165,6 +198,7 @@ export default function NewInvoicePage() {
         autoChaseEnabled: formData.autoChaseEnabled && isPro,
         autoChaseDays: formData.autoChaseDays,
         maxChases: formData.maxChases,
+        ...(emailOverrides ? { emailOverrides } : {}),
       });
 
       setCreatedInvoiceId(invoiceId);
@@ -186,6 +220,8 @@ export default function NewInvoicePage() {
         autoChaseDays: 3,
         maxChases: 3,
       });
+      setEmailDrafts(buildEmailDraftsFromStored(undefined));
+      setEmailKind("initial");
       setLoading(false);
     } catch (error: unknown) {
       console.error("Failed to create invoice:", error);
@@ -375,6 +411,34 @@ export default function NewInvoicePage() {
               />
             </FormField>
           </div>
+
+          <InvoiceEmailPreviewSection
+            selectedKind={emailKind}
+            onKindChange={setEmailKind}
+            subject={emailDrafts[emailKind].subject}
+            body={emailDrafts[emailKind].body}
+            onSubjectChange={(subject) =>
+              setEmailDrafts((prev) => ({ ...prev, [emailKind]: { ...prev[emailKind], subject } }))
+            }
+            onBodyChange={(body) =>
+              setEmailDrafts((prev) => ({ ...prev, [emailKind]: { ...prev[emailKind], body } }))
+            }
+            onResetToDefaults={() => setEmailDrafts((prev) => resetEmailDraftKind(prev, emailKind))}
+            previewContext={{
+              customerName: formData.customerName,
+              invoiceNumber: formData.invoiceNumber.trim() || "—",
+              dueAt: (() => {
+                const ts = formData.dueDate ? dateInputToTimestamp(formData.dueDate) : null;
+                const d = ts ? toJsDate(ts) : null;
+                return d ? d.toISOString() : new Date().toISOString();
+              })(),
+              amountCents: Math.round(parseFloat(formData.amount || "0") * 100) || 0,
+              companyName: companyNameForPreview,
+              paymentLink: formData.paymentLink.trim(),
+              weekNumberPreview: 1,
+            }}
+            disabled={loading}
+          />
 
           <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
             <h3 className="text-lg font-semibold text-gray-900">Auto-Chase Settings</h3>

@@ -5,6 +5,14 @@ import { useRouter, useParams, useSearchParams, usePathname } from "next/navigat
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { subscribeToInvoice, subscribeToChaseEvents, updateInvoice, FirestoreInvoice, ChaseEvent } from "@/lib/invoices";
+import type { EmailOverrideKey } from "@/lib/email/emailOverrides";
+import {
+  buildEmailDraftsFromStored,
+  pickEmailOverridesToSave,
+  resetEmailDraftKind,
+  type EmailDraftsState,
+} from "@/lib/email/emailDraftUtils";
+import { InvoiceEmailPreviewSection } from "@/components/invoices/InvoiceEmailPreviewSection";
 import { dateInputToTimestamp, timestampToDateInput, toJsDate } from "@/lib/dates";
 import { AutoChaseDays } from "@/domain/types";
 import { Header } from "@/components/layout/header";
@@ -52,6 +60,7 @@ export default function InvoiceDetailPage() {
   const didRedirectRef = useRef<boolean>(false);
   const mountedRef = useRef(true);
   const invoiceDetailSubsRef = useRef<{ invoice: () => void; chase: () => void } | null>(null);
+  const emailOverridesDirtyRef = useRef(false);
   const { showToast, ToastComponent } = useToast();
 
   const [formData, setFormData] = useState<{
@@ -73,6 +82,29 @@ export default function InvoiceDetailPage() {
     autoChaseDays: 3,
     maxChases: 3,
   });
+
+  const [emailDrafts, setEmailDrafts] = useState<EmailDraftsState>(() => buildEmailDraftsFromStored(undefined));
+  const [emailKind, setEmailKind] = useState<EmailOverrideKey>("initial");
+  const [companyNameForPreview, setCompanyNameForPreview] = useState("Your business");
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch("/api/business-profile", { headers: { Authorization: `Bearer ${token}` } });
+        const data = (await res.json().catch(() => ({}))) as { exists?: boolean; profile?: { companyName?: string } };
+        if (cancelled || !data.exists || !data.profile?.companyName?.trim()) return;
+        setCompanyNameForPreview(data.profile.companyName.trim());
+      } catch {
+        /* keep default */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   useEffect(() => {
     if (firebaseUnavailable || !auth) {
@@ -117,6 +149,9 @@ export default function InvoiceDetailPage() {
           autoChaseDays: (inv.autoChaseDays as AutoChaseDays) || 3,
           maxChases: inv.maxChases || 3,
         });
+        if (!emailOverridesDirtyRef.current) {
+          setEmailDrafts(buildEmailDraftsFromStored(inv.emailOverrides));
+        }
         setJustSaved(false);
         if (shouldStartEditing) setIsEditing(true);
       };
@@ -275,8 +310,10 @@ export default function InvoiceDetailPage() {
         autoChaseEnabled: formData.autoChaseEnabled && isPro,
         autoChaseDays: formData.autoChaseDays,
         maxChases: formData.maxChases,
+        emailOverrides: pickEmailOverridesToSave(emailDrafts) ?? null,
       });
 
+      emailOverridesDirtyRef.current = false;
       setSuccessMessage("Saved");
       setIsEditing(false);
       setJustSaved(true);
@@ -665,6 +702,7 @@ export default function InvoiceDetailPage() {
                     onClick={() => {
                       setIsEditing(false);
                       setErrors({});
+                      emailOverridesDirtyRef.current = false;
                       // Reset form data to invoice values
                       const dueDate = (() => {
                         const date = toJsDate(invoice.dueAt);
@@ -680,6 +718,7 @@ export default function InvoiceDetailPage() {
                         autoChaseDays: (invoice.autoChaseDays as AutoChaseDays) || 3,
                         maxChases: invoice.maxChases || 3,
                       });
+                      setEmailDrafts(buildEmailDraftsFromStored(invoice.emailOverrides));
                     }}
                   >
                     Cancel
@@ -755,6 +794,38 @@ export default function InvoiceDetailPage() {
                     <option value="paid">Paid</option>
                   </Select>
                 </FormField>
+
+                <InvoiceEmailPreviewSection
+                  selectedKind={emailKind}
+                  onKindChange={setEmailKind}
+                  subject={emailDrafts[emailKind].subject}
+                  body={emailDrafts[emailKind].body}
+                  onSubjectChange={(subject) => {
+                    emailOverridesDirtyRef.current = true;
+                    setEmailDrafts((prev) => ({ ...prev, [emailKind]: { ...prev[emailKind], subject } }));
+                  }}
+                  onBodyChange={(body) => {
+                    emailOverridesDirtyRef.current = true;
+                    setEmailDrafts((prev) => ({ ...prev, [emailKind]: { ...prev[emailKind], body } }));
+                  }}
+                  onResetToDefaults={() => {
+                    emailOverridesDirtyRef.current = true;
+                    setEmailDrafts((prev) => resetEmailDraftKind(prev, emailKind));
+                  }}
+                  previewContext={{
+                    customerName: formData.customerName,
+                    invoiceNumber: (invoice.invoiceNumber as string | undefined)?.trim() || invoice.id.slice(0, 8),
+                    dueAt: (() => {
+                      const ts = formData.dueDate ? dateInputToTimestamp(formData.dueDate) : null;
+                      const d = ts ? toJsDate(ts) : null;
+                      return d ? d.toISOString() : new Date().toISOString();
+                    })(),
+                    amountCents: Math.round(parseFloat(formData.amount || "0") * 100) || 0,
+                    companyName: companyNameForPreview,
+                    paymentLink: (invoice.paymentLink as string | undefined) || "",
+                    weekNumberPreview: 1,
+                  }}
+                />
 
                 {/* Auto-Chase Settings */}
                 <div className="pt-4 border-t border-gray-200">

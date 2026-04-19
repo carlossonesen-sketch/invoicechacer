@@ -5,6 +5,7 @@
 import { getAuth } from "firebase-admin/auth";
 import { getAdminApp, getAdminFirestore } from "@/lib/firebase-admin";
 import { sendEmailSafe } from "./sendEmailSafe";
+import type { EmailOverrides } from "./emailOverrides";
 import { renderInvoiceEmail } from "./templates/invoiceTemplates";
 
 const SUPPORT_EMAIL = "support@invoicechaser.online";
@@ -18,6 +19,8 @@ export interface InvoiceForEmailSend {
   dueAt: string | Date; // ISO string or Date
   paymentLink?: string | null;
   invoiceNumber?: string;
+  /** Per-type subject/body overrides (still use {{tokens}} until send). */
+  emailOverrides?: EmailOverrides | null;
 }
 
 export interface SendInvoiceEmailParams {
@@ -95,6 +98,7 @@ export async function sendInvoiceEmail(params: SendInvoiceEmailParams): Promise<
     companyName,
     companyEmail,
     companyPhone,
+    emailOverrides: invoice.emailOverrides,
   });
 
   await sendEmailSafe({

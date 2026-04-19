@@ -13,6 +13,7 @@ import { isApiError } from "@/lib/api/ApiError";
 import { getAuthenticatedUserId } from "@/lib/api/auth";
 import { requireActiveTrialOrPaid } from "@/lib/api/trial";
 import { resolveInvoiceRefAndBusinessId } from "@/lib/invoicePaths";
+import { invoiceForEmailSendFromFirestore } from "@/lib/email/invoiceEmailPayloadServer";
 
 // Force Node.js runtime for Vercel
 export const runtime = "nodejs";
@@ -104,16 +105,11 @@ export async function POST(request: NextRequest) {
     const dueAtDate =
       data.dueAt instanceof Timestamp ? data.dueAt.toDate() : new Date(String(data.dueAt ?? ""));
 
-    const invoicePayload = {
-      id: invoiceId,
-      userId: businessId || "",
-      customerName: (data.customerName as string) || "Customer",
-      customerEmail: (data.customerEmail as string) ?? "",
-      amount: (data.amount as number) ?? 0,
-      dueAt: dueAtDate,
-      paymentLink: (data.paymentLink as string | null) ?? null,
-      invoiceNumber: (data.invoiceNumber as string) || invoiceId.slice(0, 8),
-    };
+    const invoicePayload = invoiceForEmailSendFromFirestore(
+      data as Record<string, unknown>,
+      invoiceId,
+      businessId || ""
+    );
 
     // Manual send: distinct manual type (invoice_updated), DO NOT touch auto-chase fields
     await sendInvoiceEmail({

@@ -13,6 +13,7 @@ import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { computeNextInvoiceEmailToSend, InvoiceForSchedule } from "@/lib/email/scheduler/invoiceEmailSchedule";
 import { sendInvoiceEmail } from "@/lib/email/sendInvoiceEmail";
+import { invoiceForEmailSendFromFirestore } from "@/lib/email/invoiceEmailPayloadServer";
 import { getRequestId } from "@/lib/api/requestId";
 import { mapErrorToHttp } from "@/lib/api/httpError";
 import { isApiError } from "@/lib/api/ApiError";
@@ -137,16 +138,7 @@ export async function POST(request: NextRequest) {
 
         // Send the email
         await sendInvoiceEmail({
-          invoice: {
-            id: invoice.id,
-            userId: invoice.userId,
-            customerName: data.customerName || "Customer",
-            customerEmail: invoice.customerEmail,
-            amount: data.amount || 0,
-            dueAt: invoice.dueAt instanceof Timestamp ? invoice.dueAt.toDate() : new Date(invoice.dueAt),
-            paymentLink: invoice.paymentLink,
-            invoiceNumber: data.invoiceNumber || doc.id.slice(0, 8),
-          },
+          invoice: invoiceForEmailSendFromFirestore(data as Record<string, unknown>, doc.id, uid),
           type: nextEmail.type,
           weekNumber: nextEmail.weekNumber,
         });

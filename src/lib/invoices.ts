@@ -1,7 +1,9 @@
 "use client";
 
-import { collection, query, where, orderBy, limit, getDocs, onSnapshot, doc, onSnapshot as onDocSnapshot, updateDoc, Timestamp, serverTimestamp, addDoc, writeBatch, QuerySnapshot, DocumentData, QueryDocumentSnapshot, startAfter } from "firebase/firestore";
+import { collection, query, where, orderBy, limit, getDocs, onSnapshot, doc, onSnapshot as onDocSnapshot, updateDoc, Timestamp, serverTimestamp, addDoc, writeBatch, QuerySnapshot, DocumentData, QueryDocumentSnapshot, startAfter, deleteField } from "firebase/firestore";
 import { db, auth } from "./firebase";
+import type { EmailOverrides } from "./email/emailOverrides";
+import { parseEmailOverrides } from "./email/emailOverrides";
 import { logFirestoreInstrumentation } from "./firestoreInstrumentation";
 import { toJsDate } from "./dates";
 import { User, onAuthStateChanged } from "firebase/auth";
@@ -26,6 +28,8 @@ export interface FirestoreInvoice {
   nextChaseAt?: Timestamp | string;
   updatedAt?: Timestamp | string;
   paidAt?: Timestamp | string;
+  invoiceNumber?: string | null;
+  emailOverrides?: EmailOverrides | null;
 }
 
 /** Single rule for "paid": status === "paid" OR paidAt exists */
@@ -67,13 +71,16 @@ function convertSnapshotToInvoices(snapshot: QuerySnapshot<DocumentData>, user: 
       userId: data.userId || user.uid,
       notes: data.notes,
       paymentLink: data.paymentLink,
+      invoiceNumber: data.invoiceNumber ?? undefined,
+      emailOverrides: parseEmailOverrides(data.emailOverrides) ?? null,
       autoChaseEnabled: data.autoChaseEnabled || false,
       autoChaseDays: data.autoChaseDays,
       maxChases: data.maxChases,
       chaseCount: data.chaseCount || 0,
       lastChasedAt: data.lastChasedAt?.toDate?.() || data.lastChasedAt,
-      nextChaseAt: data.nextChaseAt?.toDate?.() || data.nextChaseAt,
-      updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
+    nextChaseAt: data.nextChaseAt?.toDate?.() || data.nextChaseAt,
+    updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
+    paidAt: data.paidAt?.toDate?.() || data.paidAt,
     };
 
     // Convert Timestamp to ISO string if needed (handles Timestamp, string, number, {seconds} objects)
@@ -87,6 +94,8 @@ function convertSnapshotToInvoices(snapshot: QuerySnapshot<DocumentData>, user: 
     if (nextChaseDate) invoice.nextChaseAt = nextChaseDate.toISOString();
     const updatedDate = toJsDate(invoice.updatedAt);
     if (updatedDate) invoice.updatedAt = updatedDate.toISOString();
+    const paidDate = toJsDate(invoice.paidAt);
+    if (paidDate) invoice.paidAt = paidDate.toISOString();
 
     invoices.push(invoice);
   });
@@ -296,6 +305,7 @@ export async function createInvoice(
     autoChaseEnabled?: boolean;
     autoChaseDays?: number;
     maxChases?: number;
+    emailOverrides?: EmailOverrides | null;
   }
 ): Promise<string> {
   const idToken = await user.getIdToken();
@@ -317,6 +327,9 @@ export async function createInvoice(
       autoChaseEnabled: invoiceData.autoChaseEnabled ?? false,
       autoChaseDays: invoiceData.autoChaseDays ?? null,
       maxChases: invoiceData.maxChases ?? null,
+      ...(invoiceData.emailOverrides && Object.keys(invoiceData.emailOverrides).length > 0
+        ? { emailOverrides: invoiceData.emailOverrides }
+        : {}),
     }),
   });
 
@@ -436,6 +449,8 @@ function convertDocToInvoice(docData: DocumentData, docId: string, useServerTime
     userId: data.userId,
     notes: data.notes,
     paymentLink: data.paymentLink,
+    invoiceNumber: data.invoiceNumber ?? undefined,
+    emailOverrides: parseEmailOverrides(data.emailOverrides) ?? null,
     autoChaseEnabled: data.autoChaseEnabled || false,
     autoChaseDays: data.autoChaseDays,
     maxChases: data.maxChases,
@@ -443,6 +458,7 @@ function convertDocToInvoice(docData: DocumentData, docId: string, useServerTime
     lastChasedAt: data.lastChasedAt,
     nextChaseAt: data.nextChaseAt,
     updatedAt: data.updatedAt,
+    paidAt: data.paidAt,
   };
 
   // Convert Timestamp to ISO string if needed (handles Timestamp, string, number, {seconds} objects)
@@ -456,6 +472,8 @@ function convertDocToInvoice(docData: DocumentData, docId: string, useServerTime
   if (nextChaseDate) invoice.nextChaseAt = nextChaseDate.toISOString();
   const updatedDate = toJsDate(invoice.updatedAt);
   if (updatedDate) invoice.updatedAt = updatedDate.toISOString();
+  const paidDate = toJsDate(invoice.paidAt);
+  if (paidDate) invoice.paidAt = paidDate.toISOString();
 
   return invoice;
 }
@@ -521,6 +539,8 @@ export async function updateInvoice(
     autoChaseEnabled?: boolean;
     autoChaseDays?: number;
     maxChases?: number;
+    /** Set to null to remove all per-invoice email overrides. */
+    emailOverrides?: EmailOverrides | null;
   }
 ): Promise<void> {
   if (!db) {
@@ -556,6 +576,13 @@ export async function updateInvoice(
   }
   if (updates.maxChases !== undefined) {
     updateData.maxChases = updates.maxChases;
+  }
+  if (updates.emailOverrides !== undefined) {
+    if (updates.emailOverrides === null) {
+      updateData.emailOverrides = deleteField();
+    } else {
+      updateData.emailOverrides = updates.emailOverrides;
+    }
   }
 
   // If enabling auto-chase and nextChaseAt is not set, set it

@@ -16,6 +16,7 @@ import { getAuthenticatedUserId } from "@/lib/api/auth";
 import { requireActiveTrialOrPaid } from "@/lib/api/trial";
 import { resolveInvoiceRefAndBusinessId } from "@/lib/invoicePaths";
 import { getRequestId } from "@/lib/api/requestId";
+import { invoiceForEmailSendFromFirestore } from "@/lib/email/invoiceEmailPayloadServer";
 
 export const runtime = "nodejs";
 
@@ -139,16 +140,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const invoicePayload = {
-      id: invoiceId,
-      userId: businessId || "",
-      customerName: (data.customerName as string) || "Customer",
-      customerEmail: (data.customerEmail as string) ?? "",
-      amount: (data.amount as number) ?? 0,
-      dueAt: data.dueAt instanceof Timestamp ? data.dueAt.toDate() : new Date(String(data.dueAt ?? "")),
-      paymentLink: (data.paymentLink as string | null) ?? null,
-      invoiceNumber: (data.invoiceNumber as string) || invoiceId.slice(0, 8),
-    };
+    const invoicePayload = invoiceForEmailSendFromFirestore(
+      data as Record<string, unknown>,
+      invoiceId,
+      businessId || ""
+    );
 
     if (next.type === "invoice_reminder") {
       await sendInvoiceEmail({ invoice: invoicePayload, type: "invoice_reminder" });

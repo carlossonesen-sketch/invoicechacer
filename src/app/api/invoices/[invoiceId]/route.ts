@@ -9,6 +9,7 @@ import { getAdminFirestore, initFirebaseAdmin } from "@/lib/firebase-admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { resolveInvoiceRefAndBusinessId } from "@/lib/invoicePaths";
 import { getAuthenticatedUserId } from "@/lib/api/auth";
+import { parseEmailOverrides } from "@/lib/email/emailOverrides";
 
 export const runtime = "nodejs";
 
@@ -50,6 +51,8 @@ export async function GET(
       userId: data.userId || uid,
       notes: data.notes,
       paymentLink: data.paymentLink,
+      invoiceNumber: data.invoiceNumber ?? null,
+      emailOverrides: parseEmailOverrides(data.emailOverrides) ?? null,
       autoChaseEnabled: !!data.autoChaseEnabled,
       autoChaseDays: data.autoChaseDays,
       maxChases: data.maxChases,
