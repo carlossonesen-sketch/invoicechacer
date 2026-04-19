@@ -2,7 +2,6 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { Header } from "@/components/layout/header";
 
 export const metadata: Metadata = {
   title: "Invoice Chaser — Stop losing money to unpaid invoices",
@@ -43,6 +42,25 @@ function HeroCtaCluster() {
         View pricing
       </Link>
     </div>
+  );
+}
+
+/** Server-only nav: do not use app Header here — it imports Firebase and logs env warnings on the public homepage. */
+function PublicMarketingHeader() {
+  return (
+    <header className="h-16 border-b border-gray-200 bg-white px-4 sm:px-6 flex items-center justify-between gap-4">
+      <Link href="/" className="text-lg font-semibold text-gray-900 hover:text-gray-800 shrink-0">
+        Invoice Chaser
+      </Link>
+      <nav className="flex items-center gap-4 shrink-0" aria-label="Site">
+        <Link href="/login" className="text-sm font-medium text-gray-700 hover:text-gray-900">
+          Log in
+        </Link>
+        <Link href="/pricing" className="text-sm font-medium text-gray-700 hover:text-gray-900">
+          Pricing
+        </Link>
+      </nav>
+    </header>
   );
 }
 
@@ -97,11 +115,7 @@ export default async function HomePage() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
-      <Header title="Invoice Chaser">
-        <Link href="/login" className="text-sm font-medium text-gray-700 hover:text-gray-900">
-          Log in
-        </Link>
-      </Header>
+      <PublicMarketingHeader />
 
       {/* Hero */}
       <section className="bg-gradient-to-br from-blue-600 via-blue-700 to-blue-800 text-white">
