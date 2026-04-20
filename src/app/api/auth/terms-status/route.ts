@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     try {
       uid = await getAuthenticatedUserId(request);
     } catch {
-      return NextResponse.json({ accepted: false });
+      return NextResponse.json({ accepted: false, authenticated: false }, { status: 401 });
     }
 
     const db = getAdminFirestore();
@@ -34,9 +34,9 @@ export async function GET(request: NextRequest) {
 
     const accepted = termsAccepted && termsVersion === CURRENT_TERMS_VERSION;
 
-    return NextResponse.json({ accepted });
+    return NextResponse.json({ accepted, authenticated: true });
   } catch (e) {
     console.error("[GET /api/auth/terms-status]", e);
-    return NextResponse.json({ accepted: false });
+    return NextResponse.json({ accepted: false, authenticated: false }, { status: 500 });
   }
 }

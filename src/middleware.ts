@@ -71,9 +71,20 @@ export async function middleware(request: NextRequest) {
         headers: { Cookie: request.headers.get("cookie") ?? "" },
         cache: "no-store",
       });
+      // Cookie exists but cannot authenticate (expired/invalid) -> re-authenticate.
+      if (termsRes.status === 401) {
+        const loginUrl = new URL("/login", request.url);
+        loginUrl.searchParams.set("redirect", pathname);
+        return NextResponse.redirect(loginUrl);
+      }
+      if (!termsRes.ok) {
+        return NextResponse.next();
+      }
       const termsData = (await termsRes.json()) as { accepted?: boolean };
       if (!termsData.accepted) {
-        return NextResponse.redirect(new URL("/accept-terms", request.url));
+        const acceptTermsUrl = new URL("/accept-terms", request.url);
+        acceptTermsUrl.searchParams.set("redirect", pathname);
+        return NextResponse.redirect(acceptTermsUrl);
       }
     } catch {
       // On failure, allow through to avoid blocking

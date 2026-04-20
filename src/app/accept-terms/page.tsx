@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, firebaseUnavailable } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 
 export default function AcceptTermsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = useState(auth?.currentUser ?? null);
   const [loading, setLoading] = useState(true);
   const [agreed, setAgreed] = useState(false);
@@ -46,8 +47,23 @@ export default function AcceptTermsPage() {
     setError("");
     setSubmitting(true);
     try {
-      const token = await user.getIdToken();
-      const res = await fetch("/api/auth/accept-terms", {
+      const token = await user.getIdToken(true);
+
+      // Refresh server session cookie from current Firebase token before proceeding.
+      const sessionRes = await fetch("/api/auth/session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ idToken: token }),
+      });
+      if (!sessionRes.ok) {
+        setError("Your session could not be refreshed. Please sign in again.");
+        setSubmitting(false);
+        return;
+      }
+
+      const acceptRes = await fetch("/api/auth/accept-terms", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -55,13 +71,36 @@ export default function AcceptTermsPage() {
         },
         body: "{}",
       });
-      const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string; message?: string };
-      if (!res.ok) {
+      const data = (await acceptRes.json().catch(() => ({}))) as { success?: boolean; error?: string; message?: string };
+      if (!acceptRes.ok) {
         setError(data.message || data.error || "Failed to save. Please try again.");
         setSubmitting(false);
         return;
       }
-      router.replace("/dashboard");
+
+      // Ensure server-side terms reads are updated before navigating.
+      let accepted = false;
+      for (let i = 0; i < 3; i++) {
+        const statusRes = await fetch("/api/auth/terms-status", { cache: "no-store" });
+        const statusData = (await statusRes.json().catch(() => ({}))) as { accepted?: boolean };
+        if (statusRes.ok && statusData.accepted) {
+          accepted = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      if (!accepted) {
+        setError("Terms were saved, but we could not verify your session. Please try again.");
+        setSubmitting(false);
+        return;
+      }
+
+      const requestedRedirect = searchParams.get("redirect") || "/dashboard";
+      const nextPath =
+        requestedRedirect.startsWith("/") && !requestedRedirect.startsWith("//")
+          ? requestedRedirect
+          : "/dashboard";
+      router.replace(nextPath);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong. Please try again.");
