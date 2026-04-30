@@ -1,17 +1,18 @@
-﻿# Outbound Automation System
+﻿# Invoice Chaser
 
-A multi-project outbound email system designed to automate outreach, sender rotation, and tracking.
+Invoice Chaser is a full-stack SaaS platform that automates invoice follow-ups for small businesses.
 
-## Features
-- Sender rotation & warmup
-- Queue + scheduling system
-- Lead import (CSV)
-- Tracking + analytics
+## Key Features
+- Automated email reminders based on due dates
+- AWS SES email delivery with bounce handling
+- Stripe subscription billing
+- Firebase backend (Firestore + Functions)
 
 ## Tech Stack
-- Node.js
+- Next.js / Node.js
+- Firebase
 - AWS SES
-- Tauri
+- Stripe API
 
 ## Status
-Operational system used for campaign testing
+Live and tested in production
